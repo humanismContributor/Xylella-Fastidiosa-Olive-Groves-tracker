@@ -1,0 +1,10 @@
+pystac-client
+odc-stac
+numpy
+geopandas
+rasterio
+shapely
+scikit-image
+streamlit
+folium
+streamlit-folium
