@@ -16,12 +16,13 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           persist-credentials: true
-      
+
       - name: Set up Mambaforge (Geospatial Environment)
         uses: conda-incubator/setup-miniconda@v3
         with:
@@ -33,21 +34,23 @@ jobs:
 
       - name: Install Geospatial Python Packages
         run: |
-          mamba install -y geopandas rasterio shapely scikit-image pystac-client odc-stac
+          mamba install -y geopandas rasterio shapely pystac-client odc-stac odc-geo planetary-computer dask pyogrio
 
       - name: Run Satellite Scanner Analysis
         run: |
           python xylella_scanner.py
-        
+
       - name: Commit and Save Generated Map Data
         run: |
+          set -e
           git config user.name "Automated Satellite Bot"
-          git config user.email "satellite-bot@://github.com"
-          
-          if [ -f xylella_risk_zones.geojson ]; then
-            git add xylella_risk_zones.geojson
-            git diff-index --quiet HEAD || git commit -m "Automated Sync: Updated regional Xylella risk polygons"
-            git push origin main
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add xylella_risk_zones.geojson scan_status.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
           else
-            echo "No anomalies detected during this run cycle."
+            git commit -m "Automated Sync: Updated regional Xylella risk polygons"
+            git pull --rebase origin main
+            git push origin main
           fi
