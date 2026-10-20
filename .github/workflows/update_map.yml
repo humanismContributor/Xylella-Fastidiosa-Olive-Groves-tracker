@@ -1,0 +1,31 @@
+name: Weekly Xylella Scan
+
+on:
+  schedule:
+    - cron: '0 8 * * 1' # Runs every Monday at 8:00 AM
+  workflow_dispatch: # Allows you to click a button to run it manually
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+          
+      - name: Install dependencies
+        run: pip install pystac-client odc-stac matplotlib scikit-image rioxarray
+
+      - name: Run Analysis Script
+        run: python xylella_scanner.py # Your script runs here
+        
+      - name: Commit and Push New Maps
+        run: |
+          git config user.name "Automated Mapper"
+          git config user.email "bot@example.com"
+          git add results/*.png
+          git commit -m "Update satellite maps"
+          git push
