@@ -26,7 +26,7 @@ if data_exists:
 
 # CREATE INTERACTIVE MAP
 # Start centered on Puglia
-m = folium.Map(location=[40.7, 17.6], zoom_start=12, tiles="CartoDB positron")
+m = folium.Map(location=[40.7, 17.6], zoom_start=12, tiles="OpenStreetMap")
 
 if data_exists:
     # Add the infection zones
