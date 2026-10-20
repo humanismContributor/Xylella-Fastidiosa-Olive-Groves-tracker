@@ -3,29 +3,51 @@ name: Weekly Xylella Scan
 on:
   schedule:
     - cron: '0 8 * * 1' # Runs every Monday at 8:00 AM
-  workflow_dispatch: # Allows you to click a button to run it manually
+  workflow_dispatch: # Allows manual trigger click
+
+# Grants automated script authorization to write the GeoJSON back to your repo
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v4
       
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - name: Set up Mambaforge (Geospatial Environment)
+        uses: conda-incubator/setup-miniconda@v3
         with:
-          python-version: '3.9'
-          
-      - name: Install dependencies
-        run: pip install pystac-client odc-stac matplotlib scikit-image rioxarray
+          miniforge-version: latest
+          activate-environment: xylella_env
+          channels: conda-forge,defaults
+          # Installs heavy C-compiled spatial packages cleanly via conda-forge
+          python-version: "3.10"
+          architecture: "x64"
 
-      - name: Run Analysis Script
-        run: python xylella_scanner.py # Your script runs here
-        
-      - name: Commit and Push New Maps
+      - name: Install Geospatial Python Packages
+        shell: bash -l {0}
         run: |
-          git config user.name "Automated Mapper"
-          git config user.email "bot@example.com"
-          git add results/*.png
-          git commit -m "Update satellite maps"
-          git push
+          mamba install -y geopandas rasterio shapely scikit-image pystac-client odc-stac
+
+      - name: Run Satellite Scanner Analysis
+        shell: bash -l {0}
+        run: |
+          python xylella_scanner.py
+        
+      - name: Commit and Save Generated Map Data
+        shell: bash -l {0}
+        run: |
+          git config user.name "Automated Satellite Bot"
+          git config user.email "satellite-bot@://github.com"
+          
+          # Check if the scanner found changes and generated the file
+          if [ -f xylella_risk_zones.geojson ]; then
+            git add xylella_risk_zones.geojson
+            # Only commit if changes exist to avoid empty run crashes
+            git diff-index --quiet HEAD || git commit -m "Automated Sync: Updated regional Xylella risk polygons"
+            git push
+          else
+            echo "No anomalies detected during this run cycle."
+          fi
