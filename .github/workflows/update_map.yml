@@ -2,12 +2,16 @@ name: Weekly Xylella Scan
 
 on:
   schedule:
-    - cron: '0 8 * * 1' # Runs every Monday at 8:00 AM
-  workflow_dispatch: # Allows manual trigger click
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
 
-# Grants automated script authorization to write the GeoJSON back to your repo
 permissions:
   contents: write
+
+# FORCE ALL STEPS TO USE THE CORRECT GEOSPATIAL ENVIRONMENT
+defaults:
+  run:
+    shell: bash -l {0}
 
 jobs:
   build:
@@ -16,7 +20,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: true # Ensures local Git has authorization to push back
+          persist-credentials: true
       
       - name: Set up Mambaforge (Geospatial Environment)
         uses: conda-incubator/setup-miniconda@v3
@@ -28,26 +32,20 @@ jobs:
           architecture: "x64"
 
       - name: Install Geospatial Python Packages
-        shell: bash -l {0}
         run: |
           mamba install -y geopandas rasterio shapely scikit-image pystac-client odc-stac
 
       - name: Run Satellite Scanner Analysis
-        shell: bash -l {0}
         run: |
           python xylella_scanner.py
         
       - name: Commit and Save Generated Map Data
-        shell: bash -l {0}
         run: |
-          # FIXED EMAIL SYNTAX: Replaced broken URL characters with a clean mock email address
           git config user.name "Automated Satellite Bot"
-          git config user.email "satellite-bot@users.noreply.github.com"
+          git config user.email "satellite-bot@://github.com"
           
-          # Check if the scanner found changes and generated the file
           if [ -f xylella_risk_zones.geojson ]; then
             git add xylella_risk_zones.geojson
-            # Only commit if changes exist to avoid empty run crashes
             git diff-index --quiet HEAD || git commit -m "Automated Sync: Updated regional Xylella risk polygons"
             git push origin main
           else
