@@ -26,6 +26,13 @@ ROLE_TEXT = {
     "outbreak": "Around a recent official outbreak. A flagged area is a lead for inspection, not a confirmed case.",
     "experimental": "Experimental: the thresholds were derived for olive groves, not for this crop.",
 }
+COUNTRY = {
+    "present": {"fill": "#B91C1C", "label": "Xylella present (EPPO)"},
+    "absent": {"fill": "#15803D", "label": "Absent, confirmed by official survey"},
+    "no_record": {"fill": "#9CA3AF", "label": "No official record (not the same as absent)"},
+}
+COUNTRY_SHAPES_URL = ("https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/"
+                      "geojson/ne_50m_admin_0_countries.geojson")
 # Natural spread rates used for the projected envelope
 SPREAD = {
     "pauca": (10.0, "about 10 km a year (95 % range 7.5–12.5), estimated from Puglia's monitoring data (Kottelenberg et al. 2021)"),
@@ -56,6 +63,40 @@ def regions():
 
 def records():
     return (read_json(str(ROOT / "official_outbreaks.json")) or {"records": []})["records"]
+
+
+def countries():
+    return read_json(str(ROOT / "country_status.json")) or {"countries": []}
+
+
+def basin():
+    return (read_json(str(DATA / "basin" / "summary.json")),
+            read_json(str(DATA / "basin" / "hotspots.geojson")))
+
+
+def _round(coords, nd=2):
+    if isinstance(coords[0], (int, float)):
+        return [round(coords[0], nd), round(coords[1], nd)]
+    return [_round(c, nd) for c in coords]
+
+
+@st.cache_data(ttl=7 * 86400, show_spinner="Loading country outlines…")
+def country_shapes(codes: tuple):
+    """Natural Earth outlines for the listed ISO3 codes, or None if unavailable."""
+    try:
+        import requests
+        data = requests.get(COUNTRY_SHAPES_URL, timeout=30).json()
+    except Exception:
+        return None
+    feats = []
+    for f in data.get("features", []):
+        p = f.get("properties", {})
+        code = next((p[k] for k in ("ISO_A3", "ADM0_A3", "ISO_A3_EH") if p.get(k) in codes), None)
+        if code and f.get("geometry"):
+            g = f["geometry"]
+            feats.append({"type": "Feature", "properties": {"iso3": code},
+                          "geometry": {"type": g["type"], "coordinates": _round(g["coordinates"])}})
+    return feats
 
 
 def region_data(rid: str):
@@ -118,6 +159,52 @@ def add_projection(m, recs, upto, years_ahead=3):
     layer.add_to(m)
 
 
+def add_countries(m, cfg):
+    info = {c["iso3"]: c for c in cfg.get("countries", [])}
+    shapes = country_shapes(tuple(sorted(info))) or []
+    layer = folium.FeatureGroup(name="Official country status", show=True)
+    if shapes:
+        for f in shapes:
+            c = info[f["properties"]["iso3"]]
+            f["properties"].update(name=c["name"], status=c["eppo_status"], note=c.get("note") or "–")
+        folium.GeoJson(
+            {"type": "FeatureCollection", "features": shapes},
+            style_function=lambda f: {
+                "fillColor": COUNTRY[info[f["properties"]["iso3"]]["category"]]["fill"],
+                "color": "#ffffff", "weight": 0.8, "fillOpacity": 0.22},
+            tooltip=folium.GeoJsonTooltip(fields=["name", "status", "note"],
+                                          aliases=["Country", "EPPO status", "Note"]),
+        ).add_to(layer)
+    drawn = {f["properties"]["iso3"] for f in shapes}
+    for code, c in info.items():          # small or missing countries get a marker
+        if code not in drawn:
+            folium.RegularPolygonMarker(
+                location=[c["lat"], c["lon"]], number_of_sides=4, radius=7,
+                color="#ffffff", weight=1, fill=True, fill_color=COUNTRY[c["category"]]["fill"], fill_opacity=0.9,
+                tooltip=f"{c['name']}: {c['eppo_status']}").add_to(layer)
+    layer.add_to(m)
+
+
+def add_basin(m, hot):
+    feats = (hot or {}).get("features", [])
+    if not feats:
+        return
+    for f in feats:
+        p = f["properties"]
+        p["label"] = STATUS.get(p.get("status"), STATUS["earlier"])["label"]
+    folium.GeoJson(
+        {"type": "FeatureCollection", "features": feats},
+        name="Basin screening (5 km squares)",
+        style_function=lambda f: {
+            "fillColor": STATUS.get(f["properties"].get("status"), STATUS["earlier"])["fill"],
+            "color": STATUS.get(f["properties"].get("status"), STATUS["earlier"])["line"],
+            "weight": 0.6, "fillOpacity": 0.6},
+        tooltip=folium.GeoJsonTooltip(
+            fields=["label", "new_ha", "again_ha", "earlier_ha", "first_season"],
+            aliases=["Square", "New (ha)", "Declining again (ha)", "Earlier (ha)", "First flagged"]),
+    ).add_to(m)
+
+
 def add_zones(m, zones):
     feats = (zones or {}).get("features", [])
     for name, sty in sorted(STATUS.items(), key=lambda kv: kv[1]["order"]):
@@ -148,22 +235,38 @@ def overview(regs, recs):
     st.subheader("Official records around the Mediterranean")
     years = sorted({r["year"] for r in recs}) or [dt.date.today().year]
     upto = st.sidebar.slider("Show official records up to", years[0], years[-1], years[-1])
+    show_countries = st.sidebar.checkbox("Official country status", value=True)
+    show_basin = st.sidebar.checkbox("Basin screening (annual, 100 m)", value=True)
     show_proj = st.sidebar.checkbox("Projected natural spread (3 years)", value=True)
-    show_regions = st.sidebar.checkbox("Satellite scan areas", value=True)
+    show_regions = st.sidebar.checkbox("Detailed scan areas (weekly, 10 m)", value=True)
 
     shown = [r for r in recs if r["year"] <= upto]
+    ccfg = countries()
+    present = sum(c["category"] == "present" for c in ccfg["countries"])
     c1, c2, c3 = st.columns(3)
     c1.metric("Records shown", len(shown))
     c2.metric(f"New in {upto}", sum(r["year"] == upto for r in recs))
-    c3.metric("Countries", len({r["country"] for r in shown}))
+    c3.metric("Countries with Xylella", f"{present} of {len(ccfg['countries'])}",
+              help=f"EPPO distribution table, checked {ccfg.get('checked', '?')}")
 
-    legend([(f"background:{RECORD_NEW};border:2px solid #111827;border-radius:50%", f"Reported in {upto}"),
-            (f"background:{RECORD_OLD};border-radius:50%", "Reported earlier"),
-            (f"border:1px dashed {PROJECTION};background:rgba(124,58,237,.12);border-radius:50%",
-             "Reach after 1, 2 and 3 years of natural spread"),
-            ("border:2px solid #2563EB", "Satellite scan area")])
+    items = [(f"background:{RECORD_NEW};border:2px solid #111827;border-radius:50%", f"Reported in {upto}"),
+             (f"background:{RECORD_OLD};border-radius:50%", "Reported earlier"),
+             (f"border:1px dashed {PROJECTION};background:rgba(124,58,237,.12);border-radius:50%",
+              "Reach after 1, 2 and 3 years of natural spread"),
+             ("border:2px solid #2563EB", "Detailed scan area")]
+    if show_countries:
+        items += [(f"background:{v['fill']};opacity:.5", v["label"]) for v in COUNTRY.values()]
+    if show_basin:
+        items += [(f"background:{s['fill']}", f"Basin square: {s['label'].lower()}")
+                  for s in sorted(STATUS.values(), key=lambda s: -s["order"])]
+    legend(items)
 
-    m = folium.Map(location=[40.0, 9.0], zoom_start=5, tiles="OpenStreetMap")
+    m = folium.Map(location=[38.5, 14.0], zoom_start=5, tiles="OpenStreetMap")
+    if show_countries:
+        add_countries(m, ccfg)
+    bsum, bhot = basin()
+    if show_basin:
+        add_basin(m, bhot)
     if show_proj:
         add_projection(m, recs, upto)
     add_records(m, recs, upto, upto)
@@ -185,6 +288,20 @@ def overview(regs, recs):
         "Rings are drawn only around records at the edge of known spread from the last three years. They are not a "
         "forecast: insects carried by vehicles and moved plants cause long jumps, as with the Gargano (2025) and "
         "Calabria (2026) outbreaks, and no ring would have predicted those.")
+
+    if show_basin:
+        if bsum:
+            pend = bsum.get("cells_pending", 0)
+            st.caption(
+                f"**Basin screening, summer {bsum['season']} vs {bsum['season'] - 1}:** {bsum['squares']} squares of "
+                f"{bsum['square_km']:g} km with sudden decline of trees or crops at 100 m "
+                f"({bsum['flagged_ha'].get('new', 0):,} ha new). Wildfire scars, towns and rotating crops are filtered "
+                "out, but this layer is not olive-specific: drought, felling or forest dieback can look the same. "
+                "A square is a reason to look closer, not a Xylella finding."
+                + (f" {pend} of {bsum['cells_total']} map cells are still being processed." if pend else ""))
+        else:
+            st.caption("**Basin screening:** no results yet. It runs each autumn after the summer it compares; "
+                       "start 'Annual Basin Screening' on GitHub to run it now.")
 
     with st.expander(f"Records from {upto}"):
         rows = [{"Place": r["place"], "Country": r["country"], "Subspecies": r["subspecies"],
@@ -261,7 +378,12 @@ def method_notes():
             "- **At 10 m only advanced decline shows.** Early or symptomless infection needs airborne hyperspectral "
             "and thermal data (Zarco-Tejada et al. 2018; D'Addabbo et al. 2025).\n"
             "- A flagged area is a lead for a field check, not a diagnosis. Only laboratory tests by the plant-health "
-            "service confirm Xylella.")
+            "service confirm Xylella.\n"
+            "- **Two scales.** The detailed areas are scanned every week in summer at 10 m. The whole Mediterranean "
+            "olive belt is screened once a year at 100 m, where one cell covers about a hectare, so only "
+            "landscape-scale loss shows. Wildfire scars (MODIS burned area) are removed at both scales.\n"
+            "- **Official layers** come from EPPO, the European Commission and regional services. A weekly check of "
+            "EPPO opens a GitHub issue for every new report; it is reviewed before it is added to the map.")
 
 
 def main():
@@ -276,6 +398,7 @@ def main():
         region_view(next(r for r in regs if r["name"] == choice), recs)
     method_notes()
     st.caption("Imagery: Copernicus Sentinel-2 (ESA) via Microsoft Planetary Computer · Land cover: ESA WorldCover 2021 · "
+               "Burned area: NASA MODIS MCD64A1 · Country outlines: Natural Earth · "
                "Official records: EPPO, European Commission, regional plant-health services and reporting of their "
                "findings (sources linked in each marker).")
 

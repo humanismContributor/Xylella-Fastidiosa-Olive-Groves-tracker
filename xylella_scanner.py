@@ -93,6 +93,10 @@ MIN_AREA_M2 = 300
 #    'parcel-shaped' so the app can show them as possible tree removal.
 PARCEL_EXTENT = 0.75
 PARCEL_MIN_M2 = 2000
+# 7. Wildfire. A burned grove loses its greenness in one summer just like a dying
+#    one. Cells mapped as burned (MODIS burned area, 500 m) between the two
+#    summers being compared are not judged for that season.
+BURNED_COLLECTION = "modis-64A1-061"
 
 PARAMS = {
     "first_season": FIRST_SEASON, "season": SEASON, "scene_cloud_max": SCENE_CLOUD_MAX,
@@ -102,6 +106,7 @@ PARAMS = {
     "max_baseline_rise": MAX_BASELINE_RISE, "recovery_share": RECOVERY_SHARE,
     "keep_worldcover": KEEP_WORLDCOVER, "builtup_buffer_px": BUILTUP_BUFFER_PX,
     "min_area_m2": MIN_AREA_M2, "parcel_extent": PARCEL_EXTENT, "parcel_min_m2": PARCEL_MIN_M2,
+    "burned_area_filter": BURNED_COLLECTION,
 }
 
 BIT_BASE_YEAR = 2010         # bit k of the history masks = season 2010 + k
@@ -155,10 +160,14 @@ def remove_small(mask, min_px: int):
     return keep[lab]
 
 
-def update_history(comps: dict, seasons, landmask, flagged, recovered) -> None:
+def update_history(comps: dict, seasons, landmask, flagged, recovered,
+                   min_px: int | None = None, burned: dict | None = None) -> None:
     """Recompute the flag bits for `seasons` and the recovery bits wherever the
-    following summer is available. Arrays are updated in place."""
-    min_px = max(1, int(np.ceil(MIN_AREA_M2 / PIXEL_M ** 2)))
+    following summer is available. Arrays are updated in place.
+    `burned` maps a season to cells that burned since the previous summer."""
+    if min_px is None:
+        min_px = max(1, int(np.ceil(MIN_AREA_M2 / PIXEL_M ** 2)))
+    burned = burned or {}
     for s in seasons:
         b = season_bit(s)
         flagged &= ~b
@@ -166,6 +175,8 @@ def update_history(comps: dict, seasons, landmask, flagged, recovered) -> None:
         if cur is None or base is None:
             continue
         m = decline_mask(cur, base, comps.get(s - 2)) & landmask
+        if burned.get(s) is not None:
+            m &= ~burned[s]
         flagged[remove_small(m, min_px)] |= b
     for s in sorted(comps):
         if any(comps.get(y) is None for y in (s - 1, s, s + 1)):
@@ -192,7 +203,7 @@ def classify(flagged, recovered, latest: int):
     return status, first
 
 
-def season_stats(flagged, recovered, seasons) -> dict:
+def season_stats(flagged, recovered, seasons, px_ha: float = PX_HA) -> dict:
     eff = flagged & ~recovered
     out = {}
     for s in seasons:
@@ -200,9 +211,9 @@ def season_stats(flagged, recovered, seasons) -> dict:
         now = (eff & b) != 0
         seen_before = (eff & np.uint32(b - 1)) != 0
         out[s] = {
-            "new_ha": round(float((now & ~seen_before).sum()) * PX_HA, 2),
-            "again_ha": round(float((now & seen_before).sum()) * PX_HA, 2),
-            "recovered_ha": round(float(((flagged & recovered & b) != 0).sum()) * PX_HA, 2),
+            "new_ha": round(float((now & ~seen_before).sum()) * px_ha, 2),
+            "again_ha": round(float((now & seen_before).sum()) * px_ha, 2),
+            "recovered_ha": round(float(((flagged & recovered & b) != 0).sum()) * px_ha, 2),
         }
     return out
 
@@ -234,14 +245,14 @@ def params_hash(region: dict) -> str:
 # --------------------------------------------------------------------------
 # Geospatial I/O (needs the conda environment from the workflow)
 # --------------------------------------------------------------------------
-def region_geobox(bbox):
-    """10 m grid in the region's UTM zone, identical for every season."""
+def region_geobox(bbox, resolution: float = PIXEL_M):
+    """Grid in the area's UTM zone, identical for every season."""
     from odc.geo.geobox import GeoBox
     from odc.geo.geom import box
     lon, lat = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
     epsg = (32600 if lat >= 0 else 32700) + int((lon + 180) // 6) + 1
     bb = box(*bbox, "EPSG:4326").to_crs(f"EPSG:{epsg}").boundingbox
-    return GeoBox.from_bbox(bb, resolution=PIXEL_M)
+    return GeoBox.from_bbox(bb, resolution=resolution)
 
 
 def open_catalog():
@@ -259,8 +270,10 @@ def _processing_baseline(item) -> float:
         return 4.0 if when >= dt.date(2022, 1, 25) else 2.0
 
 
-def load_season(catalog, gbox, bbox, year: int):
-    """Median July-August OSAVI for one year (NaN where too few clear dates)."""
+def load_season(catalog, gbox, bbox, year: int, resampling=None):
+    """Median July-August OSAVI for one year (NaN where too few clear dates).
+    `resampling` is passed to odc.stac.load (the basin screen uses 'average'
+    for the bands so a 100 m cell is the mean of what it covers)."""
     import odc.stac
     import xarray as xr
 
@@ -279,8 +292,9 @@ def load_season(catalog, gbox, bbox, year: int):
 
     parts = []
     for off, its in groups.items():
+        extra = {"resampling": resampling} if resampling else {}
         ds = odc.stac.load(its, bands=["B04", "B08", "SCL"], geobox=gbox,
-                           groupby="solar_day", chunks={"x": 2048, "y": 2048})
+                           groupby="solar_day", chunks={"x": 2048, "y": 2048}, **extra)
         red = ((ds["B04"].astype("float32") - off) / 10000).clip(min=0)
         nir = ((ds["B08"].astype("float32") - off) / 10000).clip(min=0)
         valid = ds["SCL"].isin(list(VALID_SCL)) & (ds["B04"] > 0) & (ds["B08"] > 0)
@@ -291,7 +305,36 @@ def load_season(catalog, gbox, bbox, year: int):
     return med.compute().values.astype("float32"), int(osavi.sizes["time"])
 
 
-def build_landmask(catalog, gbox, bbox, region_id: str):
+def burned_mask(catalog, gbox, bbox, season: int):
+    """Cells mapped as burned between the previous summer composite and the end
+    of this one (MODIS MCD64A1, 500 m). Wildfire scars look like sudden decline,
+    so they are excluded. Returns None if the product can't be read."""
+    import odc.stac
+    items = catalog.search(collections=[BURNED_COLLECTION], bbox=bbox,
+                           datetime=f"{season - 1}-09-01/{season}-{SEASON[1]}").item_collection()
+    if len(items) == 0:
+        return np.zeros(tuple(gbox.shape), bool)
+    ds = odc.stac.load(items, bands=["Burn_Date"], geobox=gbox, resampling="nearest")
+    return (ds["Burn_Date"] > 0).any("time").values
+
+
+def load_burned(catalog, gbox, bbox, seasons):
+    """Burned-cell masks for each season, plus a one-line description."""
+    out, failed = {}, []
+    for s in seasons:
+        try:
+            out[s] = burned_mask(catalog, gbox, bbox, s)
+        except Exception as exc:
+            out[s] = None
+            failed.append(f"{s} ({exc.__class__.__name__})")
+    if failed:
+        return out, "MODIS burned area unavailable for " + ", ".join(failed)
+    burnt = sum(int(m.sum()) for m in out.values() if m is not None)
+    return out, f"MODIS burned area (MCD64A1): {burnt} cell-seasons excluded"
+
+
+def build_landmask(catalog, gbox, bbox, region_id: str, builtup_buffer_px: int = BUILTUP_BUFFER_PX,
+                   resampling: str = "nearest"):
     """Cells allowed to be judged, plus a description for status.json."""
     from scipy import ndimage
     shape = tuple(gbox.shape)
@@ -302,8 +345,11 @@ def build_landmask(catalog, gbox, bbox, region_id: str):
         items = catalog.search(collections=["esa-worldcover"], bbox=bbox,
                                datetime="2021-01-01/2021-12-31").item_collection()
         if len(items):
-            wc = odc.stac.load(items, bands=["map"], geobox=gbox)["map"].max("time").values
-            built = ndimage.binary_dilation(wc == BUILTUP_CLASS, iterations=BUILTUP_BUFFER_PX)
+            wc = odc.stac.load(items, bands=["map"], geobox=gbox,
+                               resampling=resampling)["map"].max("time").values
+            built = wc == BUILTUP_CLASS
+            if builtup_buffer_px > 0:
+                built = ndimage.binary_dilation(built, iterations=builtup_buffer_px)
             mask &= np.isin(wc, KEEP_WORLDCOVER) & ~built
             info["worldcover"] = "ESA WorldCover 2021"
             info["worldcover_share_kept"] = round(float(mask.mean()), 3)
@@ -434,7 +480,8 @@ def scan_region(region: dict, today: dt.date) -> dict:
         if comps[year] is None:
             print("  not enough clear imagery")
 
-    update_history(comps, evaluate, landmask, flagged, recovered)
+    burned, mask_info["burned_area"] = load_burned(catalog, gbox, region["bbox"], evaluate)
+    update_history(comps, evaluate, landmask, flagged, recovered, burned=burned)
 
     all_seasons = list(range(FIRST_SEASON, latest + 1))
     stats = season_stats(flagged, recovered, all_seasons)
