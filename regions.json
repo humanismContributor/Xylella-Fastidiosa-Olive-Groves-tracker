@@ -1,0 +1,86 @@
+{
+  "_comment": "Areas the satellite scanner checks every week. Each bbox is [west, south, east, north] in degrees; keep them around 10 x 6 km so a scan fits in one GitHub Actions job. Set enabled to false to pause a region. 'role' tells the app how to read a detection: 'established' = inside the official infected zone (decline is expected), 'front' = at the advancing edge where official sampling still happens (good for checking the scanner), 'outbreak' = a recent isolated official outbreak, 'experimental' = crop or setting the thresholds were not derived for.",
+  "regions": [
+    {
+      "id": "puglia-ostuni",
+      "name": "Ostuni coastal plain (BR), Puglia",
+      "country": "Italy",
+      "bbox": [17.55, 40.75, 17.65, 40.80],
+      "crop": "olive",
+      "role": "established",
+      "official_status": "Inside the official infected zone for X. fastidiosa subsp. pauca. In a CNR field study in Gorgognolo (Ostuni) in September 2022, 78 of 235 sampled olive trees tested positive.",
+      "sources": [
+        {"title": "D'Addabbo et al. 2025, Remote Sensing 17(8):1372 (CNR)", "url": "https://www.mdpi.com/2072-4292/17/8/1372"}
+      ],
+      "enabled": true
+    },
+    {
+      "id": "puglia-monopoli-polignano",
+      "name": "Monopoli – Polignano a Mare (BA), Puglia",
+      "country": "Italy",
+      "bbox": [17.18, 40.93, 17.30, 41.00],
+      "crop": "olive",
+      "role": "front",
+      "official_status": "Advancing edge of the pauca outbreak. Infected olive trees were officially confirmed here in 2022 (about 20 near Polignano in August–September, 23 in the then pest-free part of Monopoli by October), so detections can be checked against the Region's published monitoring data.",
+      "sources": [
+        {"title": "D'Addabbo et al. 2025 (Polignano data set)", "url": "https://www.mdpi.com/2072-4292/17/8/1372"},
+        {"title": "Regione Puglia monitoring, as reported Oct 2022", "url": "https://www.greenme.it/?p=956603"}
+      ],
+      "enabled": true
+    },
+    {
+      "id": "puglia-bisceglie",
+      "name": "Bisceglie (BT), Puglia",
+      "country": "Italy",
+      "bbox": [16.44, 41.20, 16.56, 41.26],
+      "crop": "olive",
+      "role": "outbreak",
+      "official_status": "Demarcated area for subsp. pauca after infected olive trees were found north of Bari in 2025, then the northernmost record in Puglia's main olive district.",
+      "sources": [
+        {"title": "Olive Oil Times, July 2025", "url": "https://www.oliveoiltimes.com/business/europe/new-xylella-fastidiosa-infections-identified-in-puglia/141012"},
+        {"title": "Regione Puglia determination 181/DIR/2025/00141 (Bisceglie demarcated area)", "url": "https://www.comune.trani.bt.it/ocmultibinary/download/2996/56548/1/ff1fb83d536394a36b0728823fdd1c20.pdf/file/181_DIR_2025_00141_DeterminaPUB_ori.stamped.pdf"}
+      ],
+      "enabled": true
+    },
+    {
+      "id": "puglia-cagnano-varano",
+      "name": "Cagnano Varano, Gargano (FG), Puglia",
+      "country": "Italy",
+      "bbox": [15.71, 41.80, 15.83, 41.86],
+      "crop": "olive",
+      "role": "outbreak",
+      "official_status": "Demarcated area for subsp. pauca established in October 2025 after 47 infected olive trees were confirmed: the first outbreak in the province of Foggia.",
+      "sources": [
+        {"title": "Gambero Rosso, 9 Oct 2025", "url": "https://www.gamberorosso.it/notizie/attualita/xylella-gargano/"}
+      ],
+      "enabled": true
+    },
+    {
+      "id": "calabria-taurianova",
+      "name": "Taurianova, Gioia Tauro plain (RC), Calabria",
+      "country": "Italy",
+      "bbox": [15.96, 38.32, 16.06, 38.38],
+      "crop": "olive",
+      "role": "outbreak",
+      "official_status": "First subsp. pauca outbreak in Calabria: 7 infected olive trees confirmed in August 2026; demarcated area set up on 1 September 2026 and redrawn on 8 September 2026.",
+      "sources": [
+        {"title": "Regione Calabria DDS n. 14746 of 01/09/2026", "url": "https://www.regione.calabria.it/wp-content/uploads/2026/09/DDS-n.-14746-del-01-09-2026.pdf"},
+        {"title": "Regione Calabria act n. 15068 of 08/09/2026", "url": "https://www.regione.calabria.it/wp-content/uploads/2026/09/Atto_numero_15068_del_08-09-2026.pdf"}
+      ],
+      "enabled": true
+    },
+    {
+      "id": "mallorca-pla",
+      "name": "Pla de Mallorca almond orchards, Balearic Islands",
+      "country": "Spain",
+      "bbox": [2.97, 39.49, 3.07, 39.55],
+      "crop": "almond",
+      "role": "experimental",
+      "official_status": "Balearic Islands are under containment; EPPO reports a high incidence of Xylella on almond in Mallorca. The thresholds were derived for olive groves, so results here are experimental.",
+      "sources": [
+        {"title": "EPPO Global Database: X. fastidiosa subsp. fastidiosa in Spain", "url": "https://gd.eppo.int/taxon/XYLEFF/distribution/ES"}
+      ],
+      "enabled": true
+    }
+  ]
+}
