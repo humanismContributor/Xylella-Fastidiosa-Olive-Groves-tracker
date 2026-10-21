@@ -1,0 +1,57 @@
+{
+ "cell": "N31E034",
+ "bbox": [
+  34,
+  31,
+  35,
+  32
+ ],
+ "params_hash": "bfe043ed7734f775",
+ "skip": false,
+ "done_through": 2026,
+ "land_share": 0.35,
+ "dates": {
+  "2020": 24,
+  "2021": 23,
+  "2022": 23,
+  "2023": 24,
+  "2024": 22,
+  "2025": 28,
+  "2026": 29
+ },
+ "seasons": {
+  "2022": {
+   "new_ha": 2288.0,
+   "again_ha": 0.0,
+   "recovered_ha": 2141.0
+  },
+  "2023": {
+   "new_ha": 4468.0,
+   "again_ha": 54.0,
+   "recovered_ha": 1915.0
+  },
+  "2024": {
+   "new_ha": 12572.0,
+   "again_ha": 173.0,
+   "recovered_ha": 1677.0
+  },
+  "2025": {
+   "new_ha": 7014.0,
+   "again_ha": 580.0,
+   "recovered_ha": 6831.0
+  },
+  "2026": {
+   "new_ha": 2035.0,
+   "again_ha": 242.0,
+   "recovered_ha": 0.0
+  }
+ },
+ "masks": {
+  "worldcover": "ESA WorldCover 2021",
+  "olive_mask": null,
+  "worldcover_share_kept": 0.35,
+  "burned_area": "MODIS burned area (MCD64A1): 3373 cell-seasons excluded"
+ },
+ "checked": "2026-10-21",
+ "seconds": 322
+}

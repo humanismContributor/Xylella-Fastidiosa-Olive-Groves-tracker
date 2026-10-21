@@ -1,0 +1,19 @@
+{
+  "season": 2026,
+  "resolution_m": 100,
+  "square_km": 5.0,
+  "cells_total": 519,
+  "cells_done": 407,
+  "cells_skipped": 109,
+  "cells_pending": 3,
+  "seasons_in_data": [
+    2026
+  ],
+  "flagged_ha": {
+    "new": 1619020,
+    "continuing": 64264,
+    "earlier": 5033752
+  },
+  "squares": 75698,
+  "merged": "2026-10-21"
+}
