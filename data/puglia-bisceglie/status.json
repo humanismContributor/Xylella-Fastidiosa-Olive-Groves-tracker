@@ -1,0 +1,53 @@
+{
+  "region": "puglia-bisceglie",
+  "name": "Bisceglie (BT), Puglia",
+  "scan_date": "2026-10-21",
+  "last_checked": "2026-10-21",
+  "latest_season": 2026,
+  "season_complete": true,
+  "season_window": "07-01 to 08-31",
+  "compared_with": 2025,
+  "result": "ok",
+  "totals_ha": {
+    "new": 35.56,
+    "continuing": 12.08,
+    "earlier": 397.84
+  },
+  "polygons": 4053,
+  "baseline_share_in_range": 0.951,
+  "masks": {
+    "worldcover": "ESA WorldCover 2021",
+    "olive_mask": null,
+    "worldcover_share_kept": 0.527
+  },
+  "parameters": {
+    "first_season": 2019,
+    "season": [
+      "07-01",
+      "08-31"
+    ],
+    "scene_cloud_max": 30,
+    "min_dates": 3,
+    "valid_scl": [
+      4,
+      5
+    ],
+    "reflectance_offset": 1000,
+    "baseline_osavi_min": 0.12,
+    "baseline_osavi_max": 0.5,
+    "min_rel_drop": 0.3,
+    "min_abs_drop": 0.04,
+    "max_baseline_rise": 0.25,
+    "recovery_share": 0.5,
+    "keep_worldcover": [
+      10,
+      20,
+      30,
+      40
+    ],
+    "builtup_buffer_px": 2,
+    "min_area_m2": 300,
+    "parcel_extent": 0.75,
+    "parcel_min_m2": 2000
+  }
+}

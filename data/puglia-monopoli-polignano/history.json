@@ -1,0 +1,74 @@
+[
+  {
+    "season": 2019,
+    "dates": 10,
+    "judged": true,
+    "new_ha": 30.01,
+    "again_ha": 0.0,
+    "recovered_ha": 6.75,
+    "complete": true
+  },
+  {
+    "season": 2020,
+    "dates": 10,
+    "judged": true,
+    "new_ha": 228.58,
+    "again_ha": 1.06,
+    "recovered_ha": 28.34,
+    "complete": true
+  },
+  {
+    "season": 2021,
+    "dates": 12,
+    "judged": true,
+    "new_ha": 139.83,
+    "again_ha": 3.33,
+    "recovered_ha": 32.65,
+    "complete": true
+  },
+  {
+    "season": 2022,
+    "dates": 9,
+    "judged": true,
+    "new_ha": 30.27,
+    "again_ha": 2.02,
+    "recovered_ha": 33.95,
+    "complete": true
+  },
+  {
+    "season": 2023,
+    "dates": 12,
+    "judged": true,
+    "new_ha": 33.82,
+    "again_ha": 1.3,
+    "recovered_ha": 5.2,
+    "complete": true
+  },
+  {
+    "season": 2024,
+    "dates": 10,
+    "judged": true,
+    "new_ha": 73.82,
+    "again_ha": 10.59,
+    "recovered_ha": 76.4,
+    "complete": true
+  },
+  {
+    "season": 2025,
+    "dates": 14,
+    "judged": true,
+    "new_ha": 22.95,
+    "again_ha": 5.46,
+    "recovered_ha": 14.66,
+    "complete": true
+  },
+  {
+    "season": 2026,
+    "dates": 16,
+    "judged": true,
+    "new_ha": 38.14,
+    "again_ha": 6.9,
+    "recovered_ha": 0.0,
+    "complete": true
+  }
+]
