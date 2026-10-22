@@ -21,6 +21,8 @@
    "kind": "links",
    "pages": ["https://www.mapa.gob.es/es/agricultura/temas/sanidad-vegetal/organismos-nocivos/xylella-fastidiosa"],
    "pattern": "/dam/mapa/.*xylella.*\\.pdf",
+   "verify_tls": false,
+   "note": "GitHub's servers don't trust the Spanish FNMT root certificate the site uses",
    "todo": "New outbreak or demarcated area in Spain? Update `official_outbreaks.json` / `country_status.json`"
   },
   {
