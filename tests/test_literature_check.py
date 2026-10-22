@@ -61,8 +61,32 @@ def test_fetch_pages_and_sort_fallback():
 
     got = lc.fetch_recent(dt.date(2026, 10, 22), fetch=fake)
     assert len(got) == 4
-    assert calls[0]["filter"] == "publication_year:2025-2026" and calls[0]["search"] == "xylella fastidiosa"
+    filt = calls[0]["filter"].split(",")
+    assert "title_and_abstract.search:xylella fastidiosa" in filt and "publication_year:2025-2026" in filt
+    assert "search" not in calls[0]                   # full-text search returns papers that merely mention it
+    types = next(f for f in filt if f.startswith("type:"))[5:].split("|")
+    assert "article" in types and "preprint" in types and "dataset" not in types and "erratum" not in types
     assert "sort" not in calls[-1]
+
+
+def test_api_key_goes_in_header_not_url(monkeypatch):
+    seen = []
+
+    class Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"results": []}'
+
+    monkeypatch.setenv("OPENALEX_API_KEY", "secret-key")
+    monkeypatch.setattr(lc.urllib.request, "urlopen", lambda req, timeout: seen.append(req) or Resp())
+    lc.fetch_json({"filter": "x"})
+    assert seen[0].get_header("Authorization") == "Bearer secret-key"
+    assert "secret-key" not in seen[0].full_url
 
 
 @pytest.fixture

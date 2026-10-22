@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Weekly check of official sources on Xylella fastidiosa, besides EPPO
-(eppo_check.py) and the literature (openalex_check.py).
+(eppo_check.py) and the literature (literature_check.py).
 
 The sources are listed in official_sources.json (add one with the "Suggest an
 official source" issue form, see add_source.py). Each is watched in one of
