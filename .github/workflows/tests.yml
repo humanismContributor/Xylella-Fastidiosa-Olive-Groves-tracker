@@ -1,0 +1,30 @@
+name: Tests
+
+# Runs the synthetic-data tests on every push and pull request. They need only
+# numpy, scipy and pytest, so this takes well under a minute.
+
+on:
+  push:
+    paths: ["**.py", "regions.json", "basin.json", "tests/**", ".github/workflows/tests.yml"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install numpy scipy pytest
+      - name: Check that the config files are valid JSON
+        run: |
+          for f in regions.json basin.json official_outbreaks.json country_status.json; do
+            python -m json.tool "$f" > /dev/null || { echo "Invalid JSON: $f"; exit 1; }
+          done
+      - run: python -m pytest -q
