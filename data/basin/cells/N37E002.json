@@ -1,6 +1,6 @@
 {
  "cell": "N37E002",
- "params_hash": "bfe043ed7734f775",
+ "params_hash": "0ff0bc182458a66c",
  "skip": true,
  "land_share": 0.0,
  "masks": {
@@ -8,5 +8,5 @@
   "olive_mask": null,
   "worldcover_share_kept": 0.0
  },
- "checked": "2026-10-21"
+ "checked": "2026-10-22"
 }

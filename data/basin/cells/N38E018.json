@@ -6,11 +6,12 @@
   19,
   39
  ],
- "params_hash": "bfe043ed7734f775",
+ "params_hash": "0ff0bc182458a66c",
  "skip": false,
  "done_through": 2026,
  "land_share": 1.0,
  "dates": {
+  "2019": 24,
   "2020": 24,
   "2021": 23,
   "2022": 22,
@@ -51,6 +52,6 @@
   "olive_mask": null,
   "burned_area": "MODIS burned area (MCD64A1): 0 cell-seasons excluded"
  },
- "checked": "2026-10-21",
- "seconds": 710
+ "checked": "2026-10-22",
+ "seconds": 809
 }
