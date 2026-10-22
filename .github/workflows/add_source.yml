@@ -1,0 +1,56 @@
+name: Add Official Source
+
+# Runs when the approved-source label is added to a "Suggest an official source"
+# issue: tests the page, adds it to official_sources.json and closes the issue,
+# or explains in a comment why it couldn't. Only people with at least triage
+# access to the repository can add labels.
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: xylella-official
+  cancel-in-progress: false
+
+jobs:
+  add:
+    if: ${{ github.event.label.name == 'approved-source' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test and add the source
+        id: add
+        continue-on-error: true
+        env:
+          # Passed as data, never pasted into the script
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: python add_source.py --message-file "$RUNNER_TEMP/message.md"
+      - name: Commit
+        if: ${{ steps.add.outcome == 'success' }}
+        run: |
+          set -e
+          git config user.name "Automated Satellite Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add official_sources.json
+          git commit -m "Add official source from #${{ github.event.issue.number }}"
+          git pull --rebase origin main
+          git push origin main
+      - name: Report on the issue
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+        run: |
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/message.md"
+          if [ "${{ steps.add.outcome }}" = "success" ]; then
+            gh issue close "$ISSUE" --repo "$GITHUB_REPOSITORY" --reason completed
+          fi
