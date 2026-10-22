@@ -37,6 +37,8 @@ ROOT = Path(__file__).resolve().parent
 SEEN_FILE = ROOT / "openalex_seen.json"
 API = "https://api.openalex.org/works"
 QUERY = "xylella fastidiosa"
+# Research output only: leaves out GBIF occurrence downloads (datasets), errata and paratext
+TYPES = "article|preprint|review|book-chapter|book|dissertation|letter|report"
 LOOKBACK_DAYS = 60
 MAX_PAGES = 10          # 100 works per page; a normal window holds a few dozen
 MAX_LISTED = 60         # keep the issue body well under GitHub's 65k limit
@@ -66,7 +68,8 @@ def fetch_json(url: str, key: str | None, tries: int = 3) -> dict:
 def fetch_works(since: dt.date, key: str | None) -> list[dict]:
     out, cursor = [], "*"
     for _ in range(MAX_PAGES):
-        params = {"filter": f"title_and_abstract.search:{QUERY},from_publication_date:{since.isoformat()}",
+        params = {"filter": f"title_and_abstract.search:{QUERY},type:{TYPES},"
+                            f"from_publication_date:{since.isoformat()}",
                   "sort": "publication_date:desc", "per_page": "100", "select": FIELDS, "cursor": cursor}
         page = fetch_json(f"{API}?{urllib.parse.urlencode(params)}", key)
         out += page.get("results", [])
