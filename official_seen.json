@@ -20,6 +20,19 @@
     "902",
     "976"
    ]
+  },
+  "es-mapa": {
+   "items": [
+    "https://www.mapa.gob.es/dam/mapa/contenido/agricultura/temas/sanidad-vegetal/organismos-nocivos/xylella-fastydiosa/pnc_xylella_fastidiosa_actualizacion_limpio.pdf",
+    "https://www.mapa.gob.es/dam/mapa/contenido/agricultura/temas/sanidad-vegetal/xylella-fastydiosa/771.pdf",
+    "https://www.mapa.gob.es/dam/mapa/contenido/agricultura/temas/sanidad-vegetal/xylella-fastydiosa/blancalanda-enfermedadescausaxfysituacion.pdf",
+    "https://www.mapa.gob.es/dam/mapa/contenido/agricultura/temas/sanidad-vegetal/xylella-fastydiosa/boe-a-2017-655.pdf",
+    "https://www.mapa.gob.es/dam/mapa/contenido/agricultura/temas/sanidad-vegetal/xylella-fastydiosa/buenaspracticasagronomicascast1.pdf",
+    "https://www.mapa.gob.es/dam/mapa/contenido/agricultura/temas/sanidad-vegetal/xylella-fastydiosa/estermarco-tecnicasdedeteccion.pdf",
+    "https://www.mapa.gob.es/dam/mapa/contenido/agricultura/temas/sanidad-vegetal/xylella-fastydiosa/franciscojbeitia-papeldelosvectores.pdf",
+    "https://www.mapa.gob.es/dam/mapa/contenido/agricultura/temas/sanidad-vegetal/xylella-fastydiosa/instruccionescomercializacionplantasensiblexylellafastidiosa010920.pdf",
+    "https://www.mapa.gob.es/dam/mapa/contenido/agricultura/temas/sanidad-vegetal/xylella-fastydiosa/posterxylellabaleares.pdf"
+   ]
   }
  },
  "suggested": [
