@@ -1,8 +1,8 @@
 {
   "region": "puglia-ostuni",
   "name": "Ostuni coastal plain (BR), Puglia",
-  "scan_date": "2026-10-21",
-  "last_checked": "2026-10-21",
+  "scan_date": "2026-10-22",
+  "last_checked": "2026-10-22",
   "latest_season": 2026,
   "season_complete": true,
   "season_window": "07-01 to 08-31",
@@ -18,7 +18,8 @@
   "masks": {
     "worldcover": "ESA WorldCover 2021",
     "olive_mask": null,
-    "worldcover_share_kept": 0.646
+    "worldcover_share_kept": 0.646,
+    "burned_area": "MODIS burned area (MCD64A1): 0 cell-seasons excluded"
   },
   "parameters": {
     "first_season": 2019,
@@ -48,6 +49,8 @@
     "builtup_buffer_px": 2,
     "min_area_m2": 300,
     "parcel_extent": 0.75,
-    "parcel_min_m2": 2000
+    "parcel_min_m2": 2000,
+    "burned_area_filter": "modis-64A1-061",
+    "burned_window": "from the start of the baseline summer"
   }
 }
