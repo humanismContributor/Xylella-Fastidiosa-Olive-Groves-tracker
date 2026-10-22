@@ -9,8 +9,13 @@ one GitHub issue per week, so a person can decide what to act on. The newest pap
 are also kept in data/literature.json, which the app lists. Nothing here changes the
 map: a paper is a lead, not an official record.
 
+Only papers about Xylella are kept: the query matches titles and abstracts (a full-text
+search returns three times as many papers that merely mention it), and datasets such as
+GBIF occurrence downloads, errata and paratext are left out.
+
 Cost: two or three search calls per run, well inside OpenAlex's free allowance. An API
-key is optional; with the repository secret OPENALEX_API_KEY set, it is sent along.
+key is optional; with the repository secret OPENALEX_API_KEY set, it is sent in a
+header, so it never appears in a URL or a log.
 
 Usage
     python literature_check.py            # check and open the weekly issue (needs GITHUB_TOKEN)
@@ -38,6 +43,8 @@ ROOT = Path(__file__).resolve().parent
 STATE_FILE = ROOT / "data" / "literature.json"
 API = "https://api.openalex.org/works"
 QUERY = "xylella fastidiosa"
+# Research output only: leaves out datasets (GBIF occurrence downloads), errata and paratext
+TYPES = "article|preprint|review|book-chapter|book|dissertation|letter|report"
 USER_AGENT = "xylella-watch/1.0 (weekly literature check; github.com)"
 PER_PAGE = 100
 MAX_PAGES = 5            # newest 500 works of this and last year; plenty for a weekly check
@@ -79,14 +86,15 @@ TOPICS = {
 
 
 def fetch_json(params: dict, tries: int = 3) -> dict:
+    headers = {"User-Agent": USER_AGENT}
     key = os.environ.get("OPENALEX_API_KEY")
     if key:
-        params = {**params, "api_key": key}
+        headers["Authorization"] = f"Bearer {key}"
     url = API + "?" + urllib.parse.urlencode(params)
     last = None
     for i in range(tries):
         try:
-            req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+            req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=60) as r:
                 return json.loads(r.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
@@ -101,7 +109,8 @@ def fetch_json(params: dict, tries: int = 3) -> dict:
 
 def fetch_recent(today: dt.date, fetch=fetch_json) -> list[dict]:
     """Works matching the query from last year and this year, newest first."""
-    base = {"search": QUERY, "filter": f"publication_year:{today.year - 1}-{today.year}",
+    base = {"filter": f"title_and_abstract.search:{QUERY},type:{TYPES},"
+                      f"publication_year:{today.year - 1}-{today.year}",
             "per_page": PER_PAGE, "select": SELECT}
     sorts = ["publication_date:desc", None]       # fall back to relevance if sorting is refused
     for sort in sorts:
