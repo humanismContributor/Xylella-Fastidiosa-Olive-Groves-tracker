@@ -265,11 +265,16 @@ def add_countries(m, cfg):
                                           aliases=["Country", "EPPO status", "Note"]),
         ).add_to(layer)
     drawn = {f["properties"]["iso3"] for f in shapes}
-    for code, c in info.items():          # small or missing countries get a marker
+    for code, c in info.items():          # small or missing countries get a square marker
         if code not in drawn:
-            folium.RegularPolygonMarker(
-                location=[c["lat"], c["lon"]], number_of_sides=4, radius=7,
-                color="#ffffff", weight=1, fill=True, fill_color=COUNTRY[c["category"]]["fill"], fill_opacity=0.9,
+            # An HTML icon, not RegularPolygonMarker: that plugin only draws on SVG and
+            # breaks the whole overview map, which uses canvas rendering
+            folium.Marker(
+                location=[c["lat"], c["lon"]],
+                icon=folium.DivIcon(
+                    html=f'<div style="width:12px;height:12px;background:{COUNTRY[c["category"]]["fill"]};'
+                         'opacity:.9;border:1px solid #ffffff"></div>',
+                    icon_size=(14, 14), icon_anchor=(7, 7)),
                 tooltip=f"{c['name']}: {c['eppo_status']}").add_to(layer)
     layer.add_to(m)
 
