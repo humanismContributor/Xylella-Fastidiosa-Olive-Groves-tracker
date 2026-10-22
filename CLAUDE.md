@@ -11,6 +11,8 @@ point to *Xylella fastidiosa*. Deployed on Streamlit Community Cloud from `main`
 - `crop_masks.py`: parcel masks from farm registers (SIGPAC Balearics so far) for non-olive profiles.
 - `eppo_check.py`: weekly EPPO check that opens GitHub issues (workflow `eppo.yml`). Records are
   added to `official_outbreaks.json` / `country_status.json` by hand after review, never automatically.
+- `literature_check.py`: weekly OpenAlex search for new Xylella papers, one digest issue per week and
+  the newest 100 in `data/literature.json` (workflow `literature.yml`). Papers are leads, not records.
 
 ## Rules that are easy to break
 - Detection parameters are hashed. Changing `PARAMS` in `xylella_scanner.py` makes every region and

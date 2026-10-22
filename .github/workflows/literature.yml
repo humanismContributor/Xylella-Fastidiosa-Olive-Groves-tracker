@@ -1,0 +1,47 @@
+name: Weekly Literature Check
+
+# Looks for new papers on Xylella fastidiosa in OpenAlex and opens one GitHub issue
+# per week listing them by topic. The newest papers are saved to data/literature.json
+# for the app. Optional: add a free OpenAlex API key as the repository secret
+# OPENALEX_API_KEY (Settings > Secrets and variables > Actions).
+
+on:
+  schedule:
+    - cron: '23 6 * * 4'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: xylella-literature
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Check OpenAlex
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENALEX_API_KEY: ${{ secrets.OPENALEX_API_KEY }}
+        run: python literature_check.py
+      - name: Save the paper list
+        run: |
+          set -e
+          git config user.name "Automated Satellite Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/literature.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Literature check: update paper list"
+            git pull --rebase origin main
+            git push origin main
+          fi

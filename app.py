@@ -408,6 +408,17 @@ def overview(regs, recs):
         else:
             st.write("No records for this year.")
 
+    lit = read_json(str(DATA / "literature.json"))
+    if lit and lit.get("recent"):
+        with st.expander(f"Recent research on Xylella fastidiosa (checked {lit.get('checked', '?')})"):
+            st.caption("Newest papers indexed by OpenAlex, updated weekly. A paper is a lead to read, not an "
+                       "official record: outbreaks go on the map only once a plant-health authority confirms them.")
+            for p in lit["recent"][:15]:
+                where = f" · mentions {', '.join(p['places'][:4])}" if p.get("places") else ""
+                free = f" · [free full text]({p['open_access_url']})" if p.get("open_access_url") else ""
+                meta = ", ".join(x for x in (p.get("authors"), p.get("source"), p.get("date")) if x)
+                st.markdown(f"- [{p['title']}]({p['url']}) — {meta}{where}{free}")
+
 
 def region_view(r, recs):
     st.subheader(r["name"])
