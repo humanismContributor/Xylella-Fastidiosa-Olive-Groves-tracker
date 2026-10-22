@@ -1,0 +1,5 @@
+[server]
+# The app only reads files; it doesn't need to reload when they change.
+# Watching the repository runs out of inotify watches on Streamlit Community
+# Cloud once data/ holds many files.
+fileWatcherType = "none"
