@@ -19,7 +19,9 @@
    "id": "es-mapa",
    "name": "Spain, Ministry of Agriculture (MAPA)",
    "kind": "links",
-   "pages": ["https://www.mapa.gob.es/es/agricultura/temas/sanidad-vegetal/organismos-nocivos/xylella-fastidiosa"],
+   "pages": [
+    "https://www.mapa.gob.es/es/agricultura/temas/sanidad-vegetal/organismos-nocivos/xylella-fastidiosa"
+   ],
    "pattern": "/dam/mapa/.*xylella.*\\.pdf",
    "verify_tls": false,
    "note": "GitHub's servers don't trust the Spanish FNMT root certificate the site uses",
@@ -29,19 +31,45 @@
    "id": "it-puglia",
    "name": "Puglia, Emergenza Xylella (regional plant health service)",
    "kind": "links",
-   "pages": ["http://www.emergenzaxylella.it/",
-             "http://www.emergenzaxylella.it/portal/portale_gestione_agricoltura/Documenti/normRegionale"],
+   "pages": [
+    "http://www.emergenzaxylella.it/",
+    "http://www.emergenzaxylella.it/portal/portale_gestione_agricoltura/Documenti/normRegionale"
+   ],
    "pattern": "/portal/portale_gestione_agricoltura/Documenti/.*IDNEWS=\\d+",
    "key": "IDNEWS=(\\d+)",
    "note": "Read over HTTP: the site's HTTPS certificate is issued for another domain",
    "todo": "New outbreak (focolaio) or change to the demarcated area? Update `official_outbreaks.json`"
+  },
+  {
+   "id": "informaci-n-de-inter-s-comunidad-valenci",
+   "name": "Información de interés Comunidad Valenciana",
+   "kind": "links",
+   "pages": [
+    "https://portalagrari.gva.es/es/agricultura/xylella-fastidiosa"
+   ]
   }
  ],
  "discovery": {
-  "extra_hubs": ["https://www.efsa.europa.eu/en/topics/topic/xylella-fastidiosa"],
-  "ignore_hosts": ["bsky.app", "wa.me", "twitter.com", "x.com", "www.facebook.com", "www.linkedin.com",
-                   "efsa.onlinelibrary.wiley.com", "doi.org", "audiovisual.ec.europa.eu", "open.efsa.europa.eu",
-                   "www.efsa.europa.eu", "ec.europa.eu", "food.ec.europa.eu", "www.eppo.int", "gd.eppo.int",
-                   "zenodo.org"]
+  "extra_hubs": [
+   "https://www.efsa.europa.eu/en/topics/topic/xylella-fastidiosa"
+  ],
+  "ignore_hosts": [
+   "bsky.app",
+   "wa.me",
+   "twitter.com",
+   "x.com",
+   "www.facebook.com",
+   "www.linkedin.com",
+   "efsa.onlinelibrary.wiley.com",
+   "doi.org",
+   "audiovisual.ec.europa.eu",
+   "open.efsa.europa.eu",
+   "www.efsa.europa.eu",
+   "ec.europa.eu",
+   "food.ec.europa.eu",
+   "www.eppo.int",
+   "gd.eppo.int",
+   "zenodo.org"
+  ]
  }
 }
