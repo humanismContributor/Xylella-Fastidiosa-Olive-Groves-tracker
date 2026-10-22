@@ -24,8 +24,26 @@ ROLE_TEXT = {
     "established": "Inside the official infected zone: decline here is expected, and flagged areas mostly show how fast groves are still being lost.",
     "front": "At the advancing edge, where official sampling continues. Flagged areas can be checked against the Region's published results.",
     "outbreak": "Around a recent official outbreak. A flagged area is a lead for inspection, not a confirmed case.",
-    "experimental": "Experimental: the thresholds were derived for olive groves, not for this crop.",
+    "experimental": "Experimental: the crop profile used here is inferred from the literature, not calibrated "
+                    "against field-confirmed cases.",
 }
+RELIABILITY_TEXT = {
+    "literature-based": "thresholds based on published studies",
+    "inferred": "thresholds inferred from symptom biology and airborne studies, not calibrated on satellite data",
+    "experimental": "experimental, not validated",
+}
+
+
+def satellite_fit(host: str) -> str:
+    """Whether an official record's host is something the satellite scan can watch."""
+    h = (host or "").lower()
+    if "olive" in h:
+        return "Yes (olive profile)"
+    if "almond" in h:
+        return "Yes (almond profile, inferred)"
+    if "grape" in h or "vine" in h:
+        return "Experimental (grapevine profile)"
+    return "No: these hosts are too small or scattered to see from orbit; official records only"
 COUNTRY = {
     "present": {"fill": "#B91C1C", "label": "Xylella present (EPPO)"},
     "absent": {"fill": "#15803D", "label": "Absent, confirmed by official survey"},
@@ -191,6 +209,7 @@ def record_popup(r):
         f"<b>{html.escape(r['place'])}</b> ({html.escape(r['country'])})<br>"
         f"{r['year']}: {html.escape(r['kind'])}<br>"
         f"Subspecies: {html.escape(r['subspecies'])}; host: {html.escape(r['host'])}<br>"
+        f"Satellite monitoring: {html.escape(satellite_fit(r['host']))}<br>"
         f"<a href='{html.escape(r['source_url'])}' target='_blank'>{html.escape(r['source_title'])}</a>",
         max_width=320)
 
@@ -380,13 +399,25 @@ def overview(regs, recs):
 
     with st.expander(f"Records from {upto}"):
         rows = [{"Place": r["place"], "Country": r["country"], "Subspecies": r["subspecies"],
-                 "Host": r["host"], "What happened": r["kind"], "Source": r["source_url"]}
+                 "Host": r["host"], "Satellite monitoring": satellite_fit(r["host"]),
+                 "What happened": r["kind"], "Source": r["source_url"]}
                 for r in recs if r["year"] == upto]
         if rows:
             st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
                          column_config={"Source": st.column_config.LinkColumn("Source")})
         else:
             st.write("No records for this year.")
+
+    lit = read_json(str(DATA / "literature.json"))
+    if lit and lit.get("recent"):
+        with st.expander(f"Recent research on Xylella fastidiosa (checked {lit.get('checked', '?')})"):
+            st.caption("Newest papers indexed by OpenAlex, updated weekly. A paper is a lead to read, not an "
+                       "official record: outbreaks go on the map only once a plant-health authority confirms them.")
+            for p in lit["recent"][:15]:
+                where = f" · mentions {', '.join(p['places'][:4])}" if p.get("places") else ""
+                free = f" · [free full text]({p['open_access_url']})" if p.get("open_access_url") else ""
+                meta = ", ".join(x for x in (p.get("authors"), p.get("source"), p.get("date")) if x)
+                st.markdown(f"- [{p['title']}]({p['url']}) — {meta}{where}{free}")
 
 
 def region_view(r, recs):
@@ -403,10 +434,14 @@ def region_view(r, recs):
     c2.metric("Declining again", f"{tot.get('continuing', 0):.2f} ha")
     c3.metric("Earlier seasons", f"{tot.get('earlier', 0):.2f} ha")
     season = status["latest_season"]
+    window = status.get("season_window", "07-01 to 08-31")
     c4.metric("Comparison", f"{season} vs {status['compared_with']}",
-              help="July–August median OSAVI of each summer")
+              help=f"Median OSAVI greenness over {window} (month-day) of each year")
+    prof = status.get("profile_label", "Olive")
+    rel = RELIABILITY_TEXT.get(status.get("profile_reliability", "literature-based"), "")
+    st.caption(f"**Crop profile: {prof}** ({rel}). {status.get('profile_notes', '')}")
     if not status.get("season_complete", True):
-        st.caption(f"The {season} season is still in progress; numbers can change until 31 August.")
+        st.caption(f"The {season} season is still in progress; numbers can change until the window ({window}) closes.")
     if status.get("result") != "ok":
         st.warning(f"Latest scan: {status.get('result')}")
 
@@ -439,7 +474,8 @@ def region_view(r, recs):
     st.caption(
         f"Scanned {status.get('scan_date')} (last checked {status.get('last_checked')}). "
         f"Land-cover filter: {masks.get('worldcover', 'n/a')}"
-        + (f"; olive-grove mask: {masks['olive_mask']}" if masks.get("olive_mask") else "")
+        + (f"; crop mask: {masks.get('parcels', '?')} parcels from {masks.get('source') or masks.get('crop_mask')}"
+           if masks.get("crop_mask") or masks.get("olive_mask") else "")
         + (f". {share:.0%} of judged cells had a baseline in the olive range." if share is not None else "."))
 
 
@@ -460,6 +496,11 @@ def method_notes():
             "- **Two scales.** The detailed areas are scanned every week in summer at 10 m. The whole Mediterranean "
             "olive belt is screened once a year at 100 m, where one cell covers about a hectare, so only "
             "landscape-scale loss shows. Wildfire scars (MODIS burned area) are removed at both scales.\n"
+            "- **Crop profiles.** Olive is the default. Almond areas use a later window (August–September, when "
+            "leaf scorch is fullest), a three-summer baseline and smaller yearly drops, because almond decline is "
+            "gradual; they are scanned only inside almond-orchard parcels from the farm-parcel register. Hosts such "
+            "as lavender, rosemary, broom or ornamentals can't be seen from orbit, so those outbreaks appear as "
+            "official records only.\n"
             "- **Official layers** come from EPPO, the European Commission and regional services. A weekly check of "
             "EPPO opens a GitHub issue for every new report; it is reviewed before it is added to the map.")
 

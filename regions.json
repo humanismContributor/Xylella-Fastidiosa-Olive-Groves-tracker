@@ -1,5 +1,5 @@
 {
-  "_comment": "Areas the satellite scanner checks every week. Each bbox is [west, south, east, north] in degrees; keep them around 10 x 6 km so a scan fits in one GitHub Actions job. Set enabled to false to pause a region. 'role' tells the app how to read a detection: 'established' = inside the official infected zone (decline is expected), 'front' = at the advancing edge where official sampling still happens (good for checking the scanner), 'outbreak' = a recent isolated official outbreak, 'experimental' = crop or setting the thresholds were not derived for.",
+  "_comment": "Areas the satellite scanner checks every week. Each bbox is [west, south, east, north] in degrees; keep them around 10 x 6 km so a scan fits in one GitHub Actions job. Set enabled to false to pause a region. 'profile' picks the crop rules in xylella_scanner.py (olive when missing; also almond, grapevine), and 'mask' names the parcel register that limits the scan to that crop (see crop_masks.py) - give every non-olive region a mask. 'role' tells the app how to read a detection: 'established' = inside the official infected zone (decline is expected), 'front' = at the advancing edge where official sampling still happens (good for checking the scanner), 'outbreak' = a recent isolated official outbreak, 'experimental' = crop or setting the thresholds were not derived for.",
   "regions": [
     {
       "id": "puglia-ostuni",
@@ -75,8 +75,10 @@
       "country": "Spain",
       "bbox": [2.97, 39.49, 3.07, 39.55],
       "crop": "almond",
+      "profile": "almond",
+      "mask": {"type": "sigpac-ib", "uses": ["FS", "FL", "FV"]},
       "role": "experimental",
-      "official_status": "Balearic Islands are under containment; EPPO reports a high incidence of Xylella on almond in Mallorca. The thresholds were derived for olive groves, so results here are experimental.",
+      "official_status": "Balearic Islands are under containment; EPPO reports a high incidence of Xylella on almond in Mallorca. Scanned with the almond profile, only inside dry-fruit orchard parcels from the SIGPAC register (codes FS, FL, FV: mostly almond on Mallorca).",
       "sources": [
         {"title": "EPPO Global Database: X. fastidiosa subsp. fastidiosa in Spain", "url": "https://gd.eppo.int/taxon/XYLEFF/distribution/ES"}
       ],

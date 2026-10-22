@@ -111,6 +111,72 @@ PARAMS = {
     "burned_window": "from the start of the baseline summer",
 }
 
+# --------------------------------------------------------------------------
+# Crop profiles. The rules above are the olive profile. Other hosts break its
+# assumptions, so a region in regions.json can name a profile ("profile") that
+# overrides some of them, and should then also name a crop mask ("mask", see
+# crop_masks.py), because WorldCover can't tell one orchard crop from another.
+# Changing a profile rebuilds only the regions that use it.
+# --------------------------------------------------------------------------
+OLIVE_RULES = {
+    "season": SEASON, "baseline_osavi_min": BASELINE_OSAVI_MIN, "baseline_osavi_max": BASELINE_OSAVI_MAX,
+    "min_rel_drop": MIN_REL_DROP, "min_abs_drop": MIN_ABS_DROP, "baseline_years": 1,
+    "max_baseline_spread": None, "recovery_share": RECOVERY_SHARE, "keep_worldcover": KEEP_WORLDCOVER,
+}
+PROFILES = {
+    "olive": {
+        "label": "Olive",
+        "reliability": "literature-based",
+        "overrides": {},
+        "notes": "Evergreen, steady summer greenness; olive quick decline is progressive and trees don't "
+                 "recover. Drop thresholds from Scala et al. 2024 and Hornero et al. 2020.",
+    },
+    "almond": {
+        "label": "Almond",
+        "reliability": "inferred",
+        "overrides": {
+            # Leaf scorch begins as early as June and keeps developing through the summer
+            # (UC IPM), so the window is shifted to late summer when scorch is fullest.
+            "season": ("08-01", "09-30"),
+            # Rainfed almond canopies are sparse; summer greenness at 10 m is lower than olive.
+            "baseline_osavi_min": 0.10,
+            # Decline is gradual: infected trees often survive many years while scorch spreads
+            # through the canopy (UC IPM), so the yearly drop is smaller than in olive quick decline.
+            "min_rel_drop": 0.25,
+            "min_abs_drop": 0.03,
+            # Rainfed almonds react strongly to dry years: compare with the median of three
+            # summers and skip cells whose greenness swings a lot from year to year.
+            "baseline_years": 3,
+            "max_baseline_spread": 0.35,
+        },
+        "notes": "Thresholds inferred from symptom biology (UC IPM almond leaf scorch guidelines) and "
+                 "airborne studies (Camino et al. 2021, Alicante); no Sentinel-2 calibration exists. "
+                 "Late-summer drought defoliation and harvest can look similar.",
+    },
+    "grapevine": {
+        "label": "Grapevine",
+        "reliability": "experimental",
+        "overrides": {
+            # Before harvest and leaf removal, which change the canopy more than early disease.
+            "season": ("07-01", "08-15"),
+            "baseline_osavi_min": 0.10,
+            "baseline_years": 3,
+            "max_baseline_spread": 0.35,
+        },
+        "notes": "Experimental. At 10 m a pixel mixes several vine rows with bare soil, and hedging, "
+                 "leaf removal and harvest dominate the signal. Treat any result as unvalidated.",
+    },
+}
+
+
+def profile_rules(name: str | None) -> dict:
+    """Full rule set for a profile name (olive when missing)."""
+    prof = PROFILES.get(name or "olive")
+    if prof is None:
+        raise ValueError(f"unknown profile {name!r}; known: {', '.join(PROFILES)}")
+    return {**OLIVE_RULES, **prof["overrides"]}
+
+
 BIT_BASE_YEAR = 2010         # bit k of the history masks = season 2010 + k
 STATUS_NAMES = {1: "new", 2: "continuing", 3: "earlier"}
 PX_HA = PIXEL_M * PIXEL_M / 10_000
@@ -119,10 +185,13 @@ PX_HA = PIXEL_M * PIXEL_M / 10_000
 # --------------------------------------------------------------------------
 # Pure array logic (no network, unit-tested)
 # --------------------------------------------------------------------------
-def latest_season(today: dt.date) -> tuple[int, bool]:
-    """Most recent season with usable imagery and whether that season is over."""
-    if today >= dt.date(today.year, 7, 15):
-        return today.year, today >= dt.date(today.year, 9, 1)
+def latest_season(today: dt.date, window=SEASON) -> tuple[int, bool]:
+    """Most recent season with usable imagery and whether that season is over.
+    A season counts from two weeks after its window opens."""
+    start = dt.date(today.year, *map(int, window[0].split("-")))
+    end = dt.date(today.year, *map(int, window[1].split("-")))
+    if today >= start + dt.timedelta(days=14):
+        return today.year, today > end
     return today.year - 1, True
 
 
@@ -130,24 +199,26 @@ def season_bit(season: int) -> np.uint32:
     return np.uint32(1 << (season - BIT_BASE_YEAR))
 
 
-def decline_mask(cur, base, prev=None, base_max: float = BASELINE_OSAVI_MAX):
-    """Cells whose summer OSAVI fell clearly from the baseline summer `base`."""
+def decline_mask(cur, base, prev=None, base_max: float = BASELINE_OSAVI_MAX, rules: dict | None = None):
+    """Cells whose summer OSAVI fell clearly from the baseline summer `base`.
+    `rules` (a profile_rules() dict) overrides the olive thresholds."""
+    r = rules or OLIVE_RULES
     with np.errstate(invalid="ignore", divide="ignore"):
         drop = base - cur
         ok = np.isfinite(cur) & np.isfinite(base)
-        ok &= (base >= BASELINE_OSAVI_MIN) & (base <= base_max)
-        ok &= drop >= MIN_ABS_DROP
-        ok &= drop >= MIN_REL_DROP * base
+        ok &= (base >= r["baseline_osavi_min"]) & (base <= base_max)
+        ok &= drop >= r["min_abs_drop"]
+        ok &= drop >= r["min_rel_drop"] * base
         if prev is not None:
             greened = np.isfinite(prev) & (base > prev * (1 + MAX_BASELINE_RISE))
             ok &= ~greened
     return ok
 
 
-def recovered_mask(base, cur, nxt):
-    """Cells that won back at least RECOVERY_SHARE of their drop one summer later."""
+def recovered_mask(base, cur, nxt, share: float = RECOVERY_SHARE):
+    """Cells that won back at least `share` of their drop one summer later."""
     with np.errstate(invalid="ignore"):
-        return np.isfinite(nxt) & np.isfinite(cur) & ((nxt - cur) >= RECOVERY_SHARE * (base - cur))
+        return np.isfinite(nxt) & np.isfinite(cur) & ((nxt - cur) >= share * (base - cur))
 
 
 def remove_small(mask, min_px: int):
@@ -198,12 +269,18 @@ def baseline(comps: dict, s: int, years: int = 1, max_spread: float | None = Non
 def update_history(comps: dict, seasons, landmask, flagged, recovered,
                    min_px: int | None = None, burned: dict | None = None,
                    baseline_years: int = 1, max_spread: float | None = None,
-                   base_max: float = BASELINE_OSAVI_MAX) -> None:
+                   base_max: float = BASELINE_OSAVI_MAX, rules: dict | None = None) -> None:
     """Recompute the flag bits for `seasons` and the recovery bits wherever the
     following summer is available. Arrays are updated in place.
-    `burned` maps a season to cells that burned between the two summers compared."""
+    `burned` maps a season to cells that burned between the two summers compared.
+    With `rules` (a crop profile), its thresholds, baseline and recovery settings
+    replace the keyword defaults."""
     if min_px is None:
         min_px = max(1, int(np.ceil(MIN_AREA_M2 / PIXEL_M ** 2)))
+    if rules is not None:
+        baseline_years, max_spread = rules["baseline_years"], rules["max_baseline_spread"]
+        base_max = rules["baseline_osavi_max"]
+    share = (rules or OLIVE_RULES)["recovery_share"]
     burned = burned or {}
     for s in seasons:
         b = season_bit(s)
@@ -212,7 +289,7 @@ def update_history(comps: dict, seasons, landmask, flagged, recovered,
         base, ok = baseline(comps, s, baseline_years, max_spread)
         if cur is None or base is None:
             continue
-        m = decline_mask(cur, base, None, base_max) & ok & landmask
+        m = decline_mask(cur, base, None, base_max, rules) & ok & landmask
         if burned.get(s) is not None:
             m &= ~burned[s]
         flagged[remove_small(m, min_px)] |= b
@@ -224,7 +301,7 @@ def update_history(comps: dict, seasons, landmask, flagged, recovered,
             continue
         b = season_bit(s)
         recovered &= ~b
-        rec = recovered_mask(base, comps[s], comps[s + 1]) & ((flagged & b) != 0)
+        rec = recovered_mask(base, comps[s], comps[s + 1], share) & ((flagged & b) != 0)
         recovered[rec] |= b
 
 
@@ -279,8 +356,13 @@ def round_coords(obj, nd=6):
 
 
 def params_hash(region: dict) -> str:
-    blob = json.dumps({"params": PARAMS, "bbox": region["bbox"]}, sort_keys=True)
-    return hashlib.sha256(blob.encode()).hexdigest()[:16]
+    """Changes when anything that affects a region's results changes. Olive regions
+    without a crop mask keep the hash they had before profiles existed."""
+    blob = {"params": PARAMS, "bbox": region["bbox"]}
+    name = region.get("profile", "olive")
+    if name != "olive" or region.get("mask"):
+        blob["profile"] = {"name": name, "rules": profile_rules(name), "mask": region.get("mask")}
+    return hashlib.sha256(json.dumps(blob, sort_keys=True, default=list).encode()).hexdigest()[:16]
 
 
 # --------------------------------------------------------------------------
@@ -311,16 +393,16 @@ def _processing_baseline(item) -> float:
         return 4.0 if when >= dt.date(2022, 1, 25) else 2.0
 
 
-def load_season(catalog, gbox, bbox, year: int, resampling=None):
-    """Median July-August OSAVI for one year (NaN where too few clear dates).
-    `resampling` is passed to odc.stac.load (the basin screen uses 'average'
-    for the bands so a 100 m cell is the mean of what it covers)."""
+def load_season(catalog, gbox, bbox, year: int, resampling=None, window=SEASON):
+    """Median OSAVI over the season window of one year (NaN where too few clear
+    dates). `resampling` is passed to odc.stac.load (the basin screen uses
+    'average' for the bands so a 100 m cell is the mean of what it covers)."""
     import odc.stac
     import xarray as xr
 
     items = catalog.search(
         collections=["sentinel-2-l2a"], bbox=bbox,
-        datetime=f"{year}-{SEASON[0]}/{year}-{SEASON[1]}",
+        datetime=f"{year}-{window[0]}/{year}-{window[1]}",
         query={"eo:cloud_cover": {"lt": SCENE_CLOUD_MAX}},
     ).item_collection()
     if len(items) == 0:
@@ -346,7 +428,7 @@ def load_season(catalog, gbox, bbox, year: int, resampling=None):
     return med.compute().values.astype("float32"), int(osavi.sizes["time"])
 
 
-def burned_mask(catalog, gbox, bbox, season: int, first_year: int | None = None):
+def burned_mask(catalog, gbox, bbox, season: int, first_year: int | None = None, window=SEASON):
     """Cells mapped as burned from the start of the baseline summer to the end of
     this one (MODIS MCD64A1, 500 m). Wildfire scars look like sudden decline, so
     they are excluded. The window starts with the baseline summer itself: a fire
@@ -355,19 +437,19 @@ def burned_mask(catalog, gbox, bbox, season: int, first_year: int | None = None)
     import odc.stac
     first_year = season - 1 if first_year is None else first_year
     items = catalog.search(collections=[BURNED_COLLECTION], bbox=bbox,
-                           datetime=f"{first_year}-{SEASON[0]}/{season}-{SEASON[1]}").item_collection()
+                           datetime=f"{first_year}-{window[0]}/{season}-{window[1]}").item_collection()
     if len(items) == 0:
         return np.zeros(tuple(gbox.shape), bool)
     ds = odc.stac.load(items, bands=["Burn_Date"], geobox=gbox, resampling="nearest")
     return (ds["Burn_Date"] > 0).any("time").values
 
 
-def load_burned(catalog, gbox, bbox, seasons, baseline_years: int = 1):
+def load_burned(catalog, gbox, bbox, seasons, baseline_years: int = 1, window=SEASON):
     """Burned-cell masks for each season, plus a one-line description."""
     out, failed = {}, []
     for s in seasons:
         try:
-            out[s] = burned_mask(catalog, gbox, bbox, s, first_year=s - baseline_years)
+            out[s] = burned_mask(catalog, gbox, bbox, s, first_year=s - baseline_years, window=window)
         except Exception as exc:
             out[s] = None
             failed.append(f"{s} ({exc.__class__.__name__})")
@@ -383,7 +465,7 @@ def build_landmask(catalog, gbox, bbox, region_id: str, builtup_buffer_px: int =
     from scipy import ndimage
     shape = tuple(gbox.shape)
     mask = np.ones(shape, bool)
-    info = {"worldcover": "not used", "olive_mask": None}
+    info = {"worldcover": "not used", "crop_mask": None}
     try:
         import odc.stac
         items = catalog.search(collections=["esa-worldcover"], bbox=bbox,
@@ -414,7 +496,7 @@ def build_landmask(catalog, gbox, bbox, region_id: str, builtup_buffer_px: int =
             inside = features.rasterize(shapes, out_shape=shape, transform=gbox.transform,
                                         fill=0, dtype="uint8") == 1
             mask &= inside
-            info["olive_mask"] = olive_file.name
+            info["crop_mask"] = olive_file.name
     return mask, info
 
 
@@ -483,7 +565,10 @@ def write_json(path: Path, obj) -> None:
 def scan_region(region: dict, today: dt.date) -> dict:
     out = DATA_DIR / region["id"]
     out.mkdir(parents=True, exist_ok=True)
-    latest, complete = latest_season(today)
+    profile = region.get("profile", "olive")
+    rules = profile_rules(profile)
+    window = tuple(rules["season"])
+    latest, complete = latest_season(today, window)
     gbox = region_geobox(region["bbox"])
     shape = list(gbox.shape)
     phash = params_hash(region)
@@ -510,22 +595,31 @@ def scan_region(region: dict, today: dt.date) -> dict:
         history = {}
         evaluate = list(range(FIRST_SEASON, latest + 1))
 
+    # A crop-specific profile must only see fields of that crop: build the parcel
+    # mask first, and stop (keeping the previous results) if that isn't possible.
+    import crop_masks
+    mask_meta = crop_masks.ensure_mask(region)
+
     catalog = open_catalog()
-    landmask, mask_info = build_landmask(catalog, gbox, region["bbox"], region["id"])
+    landmask, mask_info = build_landmask(catalog, gbox, region["bbox"], region["id"],
+                                         keep_classes=rules["keep_worldcover"])
+    if mask_meta:
+        mask_info.update(mask_meta)
 
     comps, dates = {}, {}
-    for year in range(min(evaluate) - 2, latest + 1):
-        print(f"{region['id']}: loading summer {year} ...", flush=True)
+    for year in range(min(evaluate) - max(2, rules["baseline_years"]), latest + 1):
+        print(f"{region['id']}: loading season {year} ({window[0]} to {window[1]}) ...", flush=True)
         try:
-            comps[year], dates[year] = load_season(catalog, gbox, region["bbox"], year)
+            comps[year], dates[year] = load_season(catalog, gbox, region["bbox"], year, window=window)
         except Exception as exc:
             print(f"  failed ({exc.__class__.__name__}: {exc}); season skipped")
             comps[year], dates[year] = None, 0
         if comps[year] is None:
             print("  not enough clear imagery")
 
-    burned, mask_info["burned_area"] = load_burned(catalog, gbox, region["bbox"], evaluate)
-    update_history(comps, evaluate, landmask, flagged, recovered, burned=burned)
+    burned, mask_info["burned_area"] = load_burned(catalog, gbox, region["bbox"], evaluate,
+                                                   baseline_years=rules["baseline_years"], window=window)
+    update_history(comps, evaluate, landmask, flagged, recovered, burned=burned, rules=rules)
 
     all_seasons = list(range(FIRST_SEASON, latest + 1))
     stats = season_stats(flagged, recovered, all_seasons)
@@ -547,7 +641,7 @@ def scan_region(region: dict, today: dt.date) -> dict:
     share = None
     if base is not None and landmask.any():
         b = base[landmask]
-        share = round(float(((b >= BASELINE_OSAVI_MIN) & (b <= BASELINE_OSAVI_MAX)).mean()), 3)
+        share = round(float(((b >= rules["baseline_osavi_min"]) & (b <= rules["baseline_osavi_max"])).mean()), 3)
 
     totals = {name: round(float((status_r == code).sum()) * PX_HA, 2) for code, name in STATUS_NAMES.items()}
     have_latest = comps.get(latest) is not None and comps.get(latest - 1) is not None
@@ -558,14 +652,20 @@ def scan_region(region: dict, today: dt.date) -> dict:
         "last_checked": today.isoformat(),
         "latest_season": latest,
         "season_complete": complete,
-        "season_window": f"{SEASON[0]} to {SEASON[1]}",
-        "compared_with": latest - 1,
+        "season_window": f"{window[0]} to {window[1]}",
+        "profile": profile,
+        "profile_label": PROFILES[profile]["label"],
+        "profile_reliability": PROFILES[profile]["reliability"],
+        "profile_notes": PROFILES[profile]["notes"],
+        "compared_with": (latest - 1 if rules["baseline_years"] == 1
+                          else f"median of {latest - rules['baseline_years']}–{latest - 1}"),
         "result": ("ok" if have_latest else "no usable imagery for the latest comparison"),
         "totals_ha": totals,
         "polygons": len(features),
         "baseline_share_in_range": share,
         "masks": mask_info,
-        "parameters": PARAMS,
+        "parameters": {**PARAMS, **{k: v for k, v in rules.items() if k != "keep_worldcover"},
+                       "keep_worldcover": rules["keep_worldcover"]},
     }
     write_json(out / "status.json", status)
 
