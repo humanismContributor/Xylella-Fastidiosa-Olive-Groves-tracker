@@ -36,6 +36,7 @@ import datetime as dt
 import hashlib
 import json
 import sys
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -94,8 +95,8 @@ MIN_AREA_M2 = 300
 PARCEL_EXTENT = 0.75
 PARCEL_MIN_M2 = 2000
 # 7. Wildfire. A burned grove loses its greenness in one summer just like a dying
-#    one. Cells mapped as burned (MODIS burned area, 500 m) between the two
-#    summers being compared are not judged for that season.
+#    one. Cells mapped as burned (MODIS burned area, 500 m) from the start of the
+#    baseline summer to the end of the summer judged are not judged for that season.
 BURNED_COLLECTION = "modis-64A1-061"
 
 PARAMS = {
@@ -107,6 +108,7 @@ PARAMS = {
     "keep_worldcover": KEEP_WORLDCOVER, "builtup_buffer_px": BUILTUP_BUFFER_PX,
     "min_area_m2": MIN_AREA_M2, "parcel_extent": PARCEL_EXTENT, "parcel_min_m2": PARCEL_MIN_M2,
     "burned_area_filter": BURNED_COLLECTION,
+    "burned_window": "from the start of the baseline summer",
 }
 
 BIT_BASE_YEAR = 2010         # bit k of the history masks = season 2010 + k
@@ -128,12 +130,12 @@ def season_bit(season: int) -> np.uint32:
     return np.uint32(1 << (season - BIT_BASE_YEAR))
 
 
-def decline_mask(cur, base, prev=None):
+def decline_mask(cur, base, prev=None, base_max: float = BASELINE_OSAVI_MAX):
     """Cells whose summer OSAVI fell clearly from the baseline summer `base`."""
     with np.errstate(invalid="ignore", divide="ignore"):
         drop = base - cur
         ok = np.isfinite(cur) & np.isfinite(base)
-        ok &= (base >= BASELINE_OSAVI_MIN) & (base <= BASELINE_OSAVI_MAX)
+        ok &= (base >= BASELINE_OSAVI_MIN) & (base <= base_max)
         ok &= drop >= MIN_ABS_DROP
         ok &= drop >= MIN_REL_DROP * base
         if prev is not None:
@@ -160,30 +162,69 @@ def remove_small(mask, min_px: int):
     return keep[lab]
 
 
+def baseline(comps: dict, s: int, years: int = 1, max_spread: float | None = None):
+    """Baseline greenness for season s and a mask of cells it may be used for.
+
+    years=1: the previous summer; cells that greened up sharply compared with
+    the summer before that are excluded (rotating crops).
+    years>1: the median of the previous `years` summers (at least two needed per
+    cell). With max_spread, cells whose summers varied by more than that share
+    of the median are excluded: olive groves are steady from year to year,
+    grassland, cereals and fodder are not."""
+    if years <= 1:
+        base, prev = comps.get(s - 1), comps.get(s - 2)
+        if base is None:
+            return None, None
+        ok = np.ones(base.shape, bool)
+        if prev is not None:
+            with np.errstate(invalid="ignore"):
+                ok &= ~(np.isfinite(prev) & (base > prev * (1 + MAX_BASELINE_RISE)))
+        return base, ok
+    stack = [comps[s - k] for k in range(1, years + 1) if comps.get(s - k) is not None]
+    if len(stack) < 2:
+        return None, None
+    arr = np.stack(stack)
+    with np.errstate(invalid="ignore", divide="ignore"), warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)  # all-NaN cells
+        med = np.nanmedian(arr, axis=0)
+        n = np.isfinite(arr).sum(axis=0)
+        ok = n >= 2
+        if max_spread is not None:
+            spread = (np.nanmax(arr, axis=0) - np.nanmin(arr, axis=0)) / med
+            ok &= np.isfinite(spread) & (spread <= max_spread)
+    return med, ok
+
+
 def update_history(comps: dict, seasons, landmask, flagged, recovered,
-                   min_px: int | None = None, burned: dict | None = None) -> None:
+                   min_px: int | None = None, burned: dict | None = None,
+                   baseline_years: int = 1, max_spread: float | None = None,
+                   base_max: float = BASELINE_OSAVI_MAX) -> None:
     """Recompute the flag bits for `seasons` and the recovery bits wherever the
     following summer is available. Arrays are updated in place.
-    `burned` maps a season to cells that burned since the previous summer."""
+    `burned` maps a season to cells that burned between the two summers compared."""
     if min_px is None:
         min_px = max(1, int(np.ceil(MIN_AREA_M2 / PIXEL_M ** 2)))
     burned = burned or {}
     for s in seasons:
         b = season_bit(s)
         flagged &= ~b
-        cur, base = comps.get(s), comps.get(s - 1)
+        cur = comps.get(s)
+        base, ok = baseline(comps, s, baseline_years, max_spread)
         if cur is None or base is None:
             continue
-        m = decline_mask(cur, base, comps.get(s - 2)) & landmask
+        m = decline_mask(cur, base, None, base_max) & ok & landmask
         if burned.get(s) is not None:
             m &= ~burned[s]
         flagged[remove_small(m, min_px)] |= b
     for s in sorted(comps):
-        if any(comps.get(y) is None for y in (s - 1, s, s + 1)):
+        if comps.get(s) is None or comps.get(s + 1) is None:
+            continue
+        base, _ = baseline(comps, s, baseline_years, max_spread)
+        if base is None:
             continue
         b = season_bit(s)
         recovered &= ~b
-        rec = recovered_mask(comps[s - 1], comps[s], comps[s + 1]) & ((flagged & b) != 0)
+        rec = recovered_mask(base, comps[s], comps[s + 1]) & ((flagged & b) != 0)
         recovered[rec] |= b
 
 
@@ -305,25 +346,28 @@ def load_season(catalog, gbox, bbox, year: int, resampling=None):
     return med.compute().values.astype("float32"), int(osavi.sizes["time"])
 
 
-def burned_mask(catalog, gbox, bbox, season: int):
-    """Cells mapped as burned between the previous summer composite and the end
-    of this one (MODIS MCD64A1, 500 m). Wildfire scars look like sudden decline,
-    so they are excluded. Returns None if the product can't be read."""
+def burned_mask(catalog, gbox, bbox, season: int, first_year: int | None = None):
+    """Cells mapped as burned from the start of the baseline summer to the end of
+    this one (MODIS MCD64A1, 500 m). Wildfire scars look like sudden decline, so
+    they are excluded. The window starts with the baseline summer itself: a fire
+    in mid-August barely moves that summer's median but shows fully a year later.
+    With a multi-year baseline, `first_year` is the earliest baseline summer."""
     import odc.stac
+    first_year = season - 1 if first_year is None else first_year
     items = catalog.search(collections=[BURNED_COLLECTION], bbox=bbox,
-                           datetime=f"{season - 1}-09-01/{season}-{SEASON[1]}").item_collection()
+                           datetime=f"{first_year}-{SEASON[0]}/{season}-{SEASON[1]}").item_collection()
     if len(items) == 0:
         return np.zeros(tuple(gbox.shape), bool)
     ds = odc.stac.load(items, bands=["Burn_Date"], geobox=gbox, resampling="nearest")
     return (ds["Burn_Date"] > 0).any("time").values
 
 
-def load_burned(catalog, gbox, bbox, seasons):
+def load_burned(catalog, gbox, bbox, seasons, baseline_years: int = 1):
     """Burned-cell masks for each season, plus a one-line description."""
     out, failed = {}, []
     for s in seasons:
         try:
-            out[s] = burned_mask(catalog, gbox, bbox, s)
+            out[s] = burned_mask(catalog, gbox, bbox, s, first_year=s - baseline_years)
         except Exception as exc:
             out[s] = None
             failed.append(f"{s} ({exc.__class__.__name__})")
@@ -334,7 +378,7 @@ def load_burned(catalog, gbox, bbox, seasons):
 
 
 def build_landmask(catalog, gbox, bbox, region_id: str, builtup_buffer_px: int = BUILTUP_BUFFER_PX,
-                   resampling: str = "nearest"):
+                   resampling: str = "nearest", keep_classes=KEEP_WORLDCOVER):
     """Cells allowed to be judged, plus a description for status.json."""
     from scipy import ndimage
     shape = tuple(gbox.shape)
@@ -350,7 +394,7 @@ def build_landmask(catalog, gbox, bbox, region_id: str, builtup_buffer_px: int =
             built = wc == BUILTUP_CLASS
             if builtup_buffer_px > 0:
                 built = ndimage.binary_dilation(built, iterations=builtup_buffer_px)
-            mask &= np.isin(wc, KEEP_WORLDCOVER) & ~built
+            mask &= np.isin(wc, keep_classes) & ~built
             info["worldcover"] = "ESA WorldCover 2021"
             info["worldcover_share_kept"] = round(float(mask.mean()), 3)
         else:

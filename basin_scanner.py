@@ -38,12 +38,32 @@ OUT = ROOT / "data" / "basin"
 CELLS = OUT / "cells"
 
 RESOLUTION = 100                  # metres per cell
-FIRST_SEASON = 2022               # first season judged (2020-2021 serve as baselines)
+FIRST_SEASON = 2022               # first season judged (2019-2021 serve as baselines)
 MIN_AREA_M2 = 30_000              # 3 ha, i.e. 3 cells
 BLOCK_PX = 50                     # 5 km summary squares
-MIN_BLOCK_HA = 3                  # squares with less flagged land are not shown
 MIN_LAND_SHARE = 0.02             # skip cells that are mostly sea, desert or towns
 BAND_RESAMPLING = {"B04": "average", "B08": "average", "SCL": "nearest"}
+
+# Stricter rules than the 10 m regional scan, added after the first basin run
+# flagged 1.6 million ha, mostly in wildfire areas (central Portugal, Galicia,
+# Aude), upland grassland (Aveyron) and arable plains (Vojvodina):
+# - the baseline is the median of the three previous summers, so one unusually
+#   green year doesn't make the next look like a decline;
+# - cells whose three baseline summers differ by more than 35 % of their median
+#   are skipped: groves are steady from year to year, grassland and crops are not;
+# - grassland (WorldCover class 30) isn't judged; olive groves are mapped as
+#   tree cover, shrubland or cropland;
+# - baseline greenness above 0.40 OSAVI is skipped: at 100 m that is closed
+#   forest or irrigated crops, not a grove with soil between the trees;
+# - a 5 km square is shown only if at least 10 ha AND 2 % of the land judged in
+#   it is flagged, so scattered noise doesn't fill the map.
+# These values are inferred, not calibrated against field data.
+BASELINE_YEARS = 3
+MAX_BASELINE_SPREAD = 0.35
+BASIN_KEEP_CLASSES = (10, 20, 40)
+BASIN_BASELINE_MAX = 0.40
+MIN_BLOCK_HA = 10
+MIN_BLOCK_SHARE = 0.02
 
 
 # --------------------------------------------------------------------------
@@ -72,7 +92,10 @@ def params_hash() -> str:
     import xylella_scanner as xs   # needs numpy
     blob = json.dumps({"rules": xs.PARAMS, "resolution": RESOLUTION, "first": FIRST_SEASON,
                        "min_area": MIN_AREA_M2, "block": BLOCK_PX, "land": MIN_LAND_SHARE,
-                       "resampling": BAND_RESAMPLING}, sort_keys=True)
+                       "resampling": BAND_RESAMPLING, "baseline_years": BASELINE_YEARS,
+                       "spread": MAX_BASELINE_SPREAD, "classes": BASIN_KEEP_CLASSES,
+                       "base_max": BASIN_BASELINE_MAX, "block_ha": MIN_BLOCK_HA,
+                       "block_share": MIN_BLOCK_SHARE}, sort_keys=True)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
@@ -103,39 +126,57 @@ def write_atomic(path: Path, text: str) -> None:
 # --------------------------------------------------------------------------
 # Screening one cell
 # --------------------------------------------------------------------------
-def summarize_blocks(status, first, transform, crs: str, latest: int, cid: str) -> list:
-    """5 km squares (GeoJSON features in EPSG:4326) with flagged hectares by status."""
+def _blocks(arr, fill=0):
+    import numpy as np
+    h, w = arr.shape
+    nby, nbx = math.ceil(h / BLOCK_PX), math.ceil(w / BLOCK_PX)
+    pad = np.full((nby * BLOCK_PX, nbx * BLOCK_PX), fill, dtype=arr.dtype)
+    pad[:h, :w] = arr
+    return pad.reshape(nby, BLOCK_PX, nbx, BLOCK_PX).transpose(0, 2, 1, 3)
+
+
+def significant(flag_ha, land_ha):
+    """A square's flagged area counts only above both an absolute and a relative floor."""
+    import numpy as np
+    return (flag_ha >= MIN_BLOCK_HA) & (flag_ha >= MIN_BLOCK_SHARE * np.maximum(land_ha, 1e-9))
+
+
+def summarize_blocks(status, first, landmask, transform, crs: str, latest: int, cid: str) -> list:
+    """5 km squares (GeoJSON features in EPSG:4326) with flagged hectares by status.
+    Only squares where some status passes `significant` are kept."""
     import numpy as np
     from rasterio.warp import transform as warp
 
     px_ha = RESOLUTION * RESOLUTION / 10_000
     h, w = status.shape
-    nby, nbx = math.ceil(h / BLOCK_PX), math.ceil(w / BLOCK_PX)
-    pad = np.zeros((nby * BLOCK_PX, nbx * BLOCK_PX), np.uint8)
-    pad[:h, :w] = status
-    blocks = pad.reshape(nby, BLOCK_PX, nbx, BLOCK_PX).transpose(0, 2, 1, 3)
-    counts = {code: (blocks == code).sum(axis=(2, 3)) for code in (1, 2, 3)}
-    fpad = np.zeros_like(pad, dtype=np.uint16)
-    fpad[:h, :w] = np.where(status > 0, first, 0)
-    fblocks = fpad.reshape(nby, BLOCK_PX, nbx, BLOCK_PX).transpose(0, 2, 1, 3)
+    blocks = _blocks(status)
+    ha = {code: (blocks == code).sum(axis=(2, 3)) * px_ha for code in (1, 2, 3)}
+    land_ha = _blocks(landmask.astype(np.uint8)).sum(axis=(2, 3)) * px_ha
+    fblocks = _blocks(np.where(status > 0, first, 0).astype(np.uint16))
+    sig = {code: significant(ha[code], land_ha) for code in (1, 2, 3)}
+    current = significant(ha[1] + ha[2], land_ha)
 
     a, _, c, _, e, f = list(transform)[:6]
     feats = []
-    total = counts[1] + counts[2] + counts[3]
-    for by, bx in zip(*np.nonzero(total * px_ha >= MIN_BLOCK_HA)):
+    for by, bx in zip(*np.nonzero(current | sig[3])):
         x0, x1 = c + bx * BLOCK_PX * a, c + min((bx + 1) * BLOCK_PX, w) * a
         y0, y1 = f + by * BLOCK_PX * e, f + min((by + 1) * BLOCK_PX, h) * e
         lons, lats = warp(crs, "EPSG:4326", [x0, x1, x1, x0, x0], [y0, y0, y1, y1, y0])
-        new_ha, again_ha, earlier_ha = (round(float(counts[k][by, bx]) * px_ha, 1) for k in (1, 2, 3))
+        new_ha, again_ha, earlier_ha = (round(float(ha[k][by, bx]), 1) for k in (1, 2, 3))
+        if current[by, bx]:
+            status_name = "continuing" if again_ha > new_ha else "new"
+        else:
+            status_name = "earlier"
+        flagged_now = new_ha + again_ha if current[by, bx] else earlier_ha
         fb = fblocks[by, bx]
-        status_name = ("new" if new_ha >= MIN_BLOCK_HA else
-                       "continuing" if again_ha >= MIN_BLOCK_HA else "earlier")
         feats.append({
             "type": "Feature",
             "geometry": {"type": "Polygon",
-                         "coordinates": [[[round(x, 4), round(y, 4)] for x, y in zip(lons, lats)]]},
+                         "coordinates": [[[round(x, 3), round(y, 3)] for x, y in zip(lons, lats)]]},
             "properties": {"cell": cid, "status": status_name, "new_ha": new_ha, "again_ha": again_ha,
-                           "earlier_ha": earlier_ha, "first_season": int(fb[fb > 0].min()) if (fb > 0).any() else None,
+                           "earlier_ha": earlier_ha, "land_ha": round(float(land_ha[by, bx])),
+                           "share": round(flagged_now / max(float(land_ha[by, bx]), 1e-9), 3),
+                           "first_season": int(fb[fb > 0].min()) if (fb > 0).any() else None,
                            "latest_season": latest},
         })
     return feats
@@ -154,7 +195,8 @@ def process_cell(cid: str, bbox, latest: int, phash: str, write_dir: Path) -> st
              and state_file.exists())
 
     catalog = xs.open_catalog()
-    landmask, mask_info = xs.build_landmask(catalog, gbox, bbox, cid, builtup_buffer_px=0, resampling="mode")
+    landmask, mask_info = xs.build_landmask(catalog, gbox, bbox, cid, builtup_buffer_px=0, resampling="mode",
+                                            keep_classes=BASIN_KEEP_CLASSES)
     land_share = float(landmask.mean())
     if land_share < MIN_LAND_SHARE:
         write_atomic(write_dir / f"{cid}.hotspots.json", "[]\n")
@@ -173,7 +215,7 @@ def process_cell(cid: str, bbox, latest: int, phash: str, write_dir: Path) -> st
         evaluate = list(range(FIRST_SEASON, latest + 1))
 
     comps, dates = {}, {}
-    for year in range(min(evaluate) - 2, latest + 1):
+    for year in range(min(evaluate) - BASELINE_YEARS, latest + 1):
         try:
             comps[year], dates[year] = xs.load_season(catalog, gbox, bbox, year, resampling=BAND_RESAMPLING)
         except Exception as exc:
@@ -182,11 +224,14 @@ def process_cell(cid: str, bbox, latest: int, phash: str, write_dir: Path) -> st
     if comps.get(latest) is None or comps.get(latest - 1) is None:
         raise RuntimeError("no usable imagery for the latest comparison")
 
-    burned, mask_info["burned_area"] = xs.load_burned(catalog, gbox, bbox, evaluate)
+    burned, mask_info["burned_area"] = xs.load_burned(catalog, gbox, bbox, evaluate,
+                                                      baseline_years=BASELINE_YEARS)
     min_px = max(1, math.ceil(MIN_AREA_M2 / RESOLUTION ** 2))
-    xs.update_history(comps, evaluate, landmask, flagged, recovered, min_px=min_px, burned=burned)
+    xs.update_history(comps, evaluate, landmask, flagged, recovered, min_px=min_px, burned=burned,
+                      baseline_years=BASELINE_YEARS, max_spread=MAX_BASELINE_SPREAD,
+                      base_max=BASIN_BASELINE_MAX)
     status, first = xs.classify(flagged, recovered, latest)
-    feats = summarize_blocks(status, first, gbox.transform, str(gbox.crs), latest, cid)
+    feats = summarize_blocks(status, first, landmask, gbox.transform, str(gbox.crs), latest, cid)
     stats = xs.season_stats(flagged, recovered, range(FIRST_SEASON, latest + 1),
                             px_ha=RESOLUTION * RESOLUTION / 10_000)
 
@@ -234,37 +279,47 @@ def cmd_batch(index: int, of: int, budget_min: float, write_dir: Path, today: dt
 
 
 def cmd_merge(today: dt.date) -> None:
+    """Combine finished cells into data/basin/hotspots.geojson and summary.json.
+    Cells screened under older rules are left out, so a map never mixes rule sets."""
     cells = all_cells()
-    feats, done, skipped, behind, totals = [], 0, 0, 0, {"new": 0.0, "continuing": 0.0, "earlier": 0.0}
+    phash = params_hash()
+    feats, done, skipped, behind = [], 0, 0, 0
+    totals = {"new": 0.0, "continuing": 0.0}
     latest = latest_complete_season(today)
     seasons_seen = set()
     for cid, _ in cells:
         meta = read_meta(cid)
-        if meta and meta.get("skip"):
-            skipped += 1
-            continue
-        if not meta:
+        if not meta or meta.get("params_hash") != phash:
             behind += 1
+            continue
+        if meta.get("skip"):
+            skipped += 1
             continue
         if meta.get("done_through", 0) < latest:
             behind += 1
         else:
             done += 1
+            season = meta.get("seasons", {}).get(str(latest), {})
+            totals["new"] += season.get("new_ha", 0)
+            totals["continuing"] += season.get("again_ha", 0)
         seasons_seen.add(meta.get("done_through"))
         hp = CELLS / f"{cid}.hotspots.json"
         if hp.exists():
-            for f in json.loads(hp.read_text()):
-                feats.append(f)
-                p = f["properties"]
-                totals["new"] += p["new_ha"]
-                totals["continuing"] += p["again_ha"]
-                totals["earlier"] += p["earlier_ha"]
-    write_atomic(OUT / "hotspots.geojson", json.dumps({"type": "FeatureCollection", "features": feats}) + "\n")
+            feats.extend(json.loads(hp.read_text()))
+    # Strongest squares first, so a viewer that draws only the top N gets the right ones
+    feats.sort(key=lambda f: (f["properties"]["status"] == "earlier", -f["properties"].get("share", 0)))
+    write_atomic(OUT / "hotspots.geojson",
+                 json.dumps({"type": "FeatureCollection", "features": feats}, separators=(",", ":")) + "\n")
+    n_status = {s: sum(f["properties"]["status"] == s for f in feats) for s in ("new", "continuing", "earlier")}
     summary = {
         "season": latest, "resolution_m": RESOLUTION, "square_km": BLOCK_PX * RESOLUTION / 1000,
         "cells_total": len(cells), "cells_done": done, "cells_skipped": skipped, "cells_pending": behind,
         "seasons_in_data": sorted(s for s in seasons_seen if s),
-        "flagged_ha": {k: round(v) for k, v in totals.items()}, "squares": len(feats),
+        "flagged_ha": {k: round(v) for k, v in totals.items()},
+        "squares": len(feats), "squares_by_status": n_status,
+        "provisional": True,
+        "rules": {"baseline_years": BASELINE_YEARS, "max_baseline_spread": MAX_BASELINE_SPREAD,
+                  "min_square_ha": MIN_BLOCK_HA, "min_square_share": MIN_BLOCK_SHARE},
         "merged": today.isoformat(),
     }
     write_atomic(OUT / "summary.json", json.dumps(summary, indent=2) + "\n")

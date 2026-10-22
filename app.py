@@ -45,15 +45,26 @@ st.set_page_config(page_title="Xylella Watch", page_icon="🫒", layout="wide")
 # ---------------------------------------------------------------------------
 # Data
 # ---------------------------------------------------------------------------
-@st.cache_data(ttl=600)
+# Large files are parsed once per version and shared, not copied on every rerun
+# (st.cache_data would copy a 24 MB structure on each click). Treat the returned
+# objects as read-only; the layer builders below make small copies.
+@st.cache_resource(max_entries=64, show_spinner=False)
+def _parse_json(path: str, mtime: float):
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
 def read_json(path: str):
     p = Path(path)
     if not p.exists():
         return None
-    try:
-        return json.loads(p.read_text())
-    except (OSError, json.JSONDecodeError):
-        return None
+    return _parse_json(str(p), p.stat().st_mtime)
+
+
+def mtime(path: Path) -> float:
+    return path.stat().st_mtime if path.exists() else 0.0
 
 
 def regions():
@@ -69,9 +80,8 @@ def countries():
     return read_json(str(ROOT / "country_status.json")) or {"countries": []}
 
 
-def basin():
-    return (read_json(str(DATA / "basin" / "summary.json")),
-            read_json(str(DATA / "basin" / "hotspots.geojson")))
+def basin_summary():
+    return read_json(str(DATA / "basin" / "summary.json"))
 
 
 def _round(coords, nd=2):
@@ -80,14 +90,14 @@ def _round(coords, nd=2):
     return [_round(c, nd) for c in coords]
 
 
-@st.cache_data(ttl=7 * 86400, show_spinner="Loading country outlines…")
-def country_shapes(codes: tuple):
-    """Natural Earth outlines for the listed ISO3 codes, or None if unavailable."""
+@st.cache_resource(show_spinner=False)
+def _country_shapes_online(codes: tuple):
+    """Fallback when country_shapes.geojson isn't in the repository."""
     try:
         import requests
         data = requests.get(COUNTRY_SHAPES_URL, timeout=30).json()
     except Exception:
-        return None
+        return []
     feats = []
     for f in data.get("features", []):
         p = f.get("properties", {})
@@ -99,11 +109,69 @@ def country_shapes(codes: tuple):
     return feats
 
 
-def region_data(rid: str):
-    folder = DATA / rid
-    return (read_json(str(folder / "status.json")),
-            read_json(str(folder / "zones.geojson")),
-            read_json(str(folder / "history.json")))
+def country_shapes(codes: tuple):
+    local = read_json(str(ROOT / "country_shapes.geojson"))
+    if local:
+        return [f for f in local.get("features", []) if f["properties"].get("iso3") in codes]
+    return _country_shapes_online(codes)
+
+
+MAX_BASIN_SQUARES = 2500   # drawing more makes the page slow; the strongest squares are kept
+
+
+@st.cache_resource(max_entries=8, show_spinner="Preparing basin layer…")
+def basin_layer(version: float, include_earlier: bool):
+    """Small FeatureCollection of the strongest basin squares, plus how many exist."""
+    hot = read_json(str(DATA / "basin" / "hotspots.geojson")) or {}
+    feats = [f for f in hot.get("features", [])
+             if include_earlier or f["properties"].get("status") != "earlier"]
+
+    def strength(f):
+        p = f["properties"]
+        now = p.get("new_ha", 0) + p.get("again_ha", 0)
+        return (p.get("status") == "earlier", -(p.get("share") or 0), -(now or p.get("earlier_ha", 0)))
+
+    feats.sort(key=strength)
+    total = len(feats)
+    out = []
+    for f in feats[:MAX_BASIN_SQUARES]:
+        p = f["properties"]
+        out.append({"type": "Feature", "geometry": f["geometry"], "properties": {
+            "status": p.get("status"),
+            "label": STATUS.get(p.get("status"), STATUS["earlier"])["label"],
+            "new_ha": p.get("new_ha"), "again_ha": p.get("again_ha"), "earlier_ha": p.get("earlier_ha"),
+            "share": f"{p['share']:.1%}" if p.get("share") is not None else "–",
+            "first_season": p.get("first_season")}})
+    return {"type": "FeatureCollection", "features": out}, total
+
+
+@st.cache_resource(max_entries=16, show_spinner="Preparing map…")
+def zones_layers(rid: str, version: float):
+    """Regional decline polygons split by status, with coordinates rounded to ~1 m
+    and only the properties the tooltip needs."""
+    zones = read_json(str(DATA / rid / "zones.geojson")) or {}
+    layers = {name: [] for name in STATUS}
+    for f in zones.get("features", []):
+        p = f["properties"]
+        name = p.get("status")
+        if name not in layers:
+            continue
+        layers[name].append({"type": "Feature",
+                             "geometry": {"type": f["geometry"]["type"],
+                                          "coordinates": _round(f["geometry"]["coordinates"], 5)},
+                             "properties": {"label": STATUS[name]["label"],
+                                            "first_season": p.get("first_season"),
+                                            "area_ha": round(p.get("area_m2", 0) / 10000, 2),
+                                            "shape": p.get("shape", "")}})
+    return layers
+
+
+def region_status(rid: str):
+    return read_json(str(DATA / rid / "status.json"))
+
+
+def region_history(rid: str):
+    return read_json(str(DATA / rid / "history.json"))
 
 
 # ---------------------------------------------------------------------------
@@ -161,12 +229,14 @@ def add_projection(m, recs, upto, years_ahead=3):
 
 def add_countries(m, cfg):
     info = {c["iso3"]: c for c in cfg.get("countries", [])}
-    shapes = country_shapes(tuple(sorted(info))) or []
+    shapes = []
+    for f in country_shapes(tuple(sorted(info))) or []:
+        c = info[f["properties"]["iso3"]]
+        shapes.append({"type": "Feature", "geometry": f["geometry"],
+                       "properties": {"iso3": c["iso3"], "name": c["name"], "status": c["eppo_status"],
+                                      "note": c.get("note") or "–"}})
     layer = folium.FeatureGroup(name="Official country status", show=True)
     if shapes:
-        for f in shapes:
-            c = info[f["properties"]["iso3"]]
-            f["properties"].update(name=c["name"], status=c["eppo_status"], note=c.get("note") or "–")
         folium.GeoJson(
             {"type": "FeatureCollection", "features": shapes},
             style_function=lambda f: {
@@ -185,36 +255,28 @@ def add_countries(m, cfg):
     layer.add_to(m)
 
 
-def add_basin(m, hot):
-    feats = (hot or {}).get("features", [])
-    if not feats:
+def add_basin(m, fc):
+    if not fc["features"]:
         return
-    for f in feats:
-        p = f["properties"]
-        p["label"] = STATUS.get(p.get("status"), STATUS["earlier"])["label"]
     folium.GeoJson(
-        {"type": "FeatureCollection", "features": feats},
+        fc,
         name="Basin screening (5 km squares)",
         style_function=lambda f: {
             "fillColor": STATUS.get(f["properties"].get("status"), STATUS["earlier"])["fill"],
             "color": STATUS.get(f["properties"].get("status"), STATUS["earlier"])["line"],
             "weight": 0.6, "fillOpacity": 0.6},
         tooltip=folium.GeoJsonTooltip(
-            fields=["label", "new_ha", "again_ha", "earlier_ha", "first_season"],
-            aliases=["Square", "New (ha)", "Declining again (ha)", "Earlier (ha)", "First flagged"]),
+            fields=["label", "new_ha", "again_ha", "earlier_ha", "share", "first_season"],
+            aliases=["Square", "New (ha)", "Declining again (ha)", "Earlier (ha)", "Share of land",
+                     "First flagged"]),
     ).add_to(m)
 
 
-def add_zones(m, zones):
-    feats = (zones or {}).get("features", [])
+def add_zones(m, layers, show_earlier=True):
     for name, sty in sorted(STATUS.items(), key=lambda kv: kv[1]["order"]):
-        subset = [f for f in feats if f["properties"].get("status") == name]
-        if not subset:
+        subset = layers.get(name, [])
+        if not subset or (name == "earlier" and not show_earlier):
             continue
-        for f in subset:
-            p = f["properties"]
-            p["label"] = sty["label"]
-            p["area_ha"] = round(p.get("area_m2", 0) / 10000, 2)
         folium.GeoJson(
             {"type": "FeatureCollection", "features": subset},
             name=sty["label"],
@@ -235,8 +297,11 @@ def overview(regs, recs):
     st.subheader("Official records around the Mediterranean")
     years = sorted({r["year"] for r in recs}) or [dt.date.today().year]
     upto = st.sidebar.slider("Show official records up to", years[0], years[-1], years[-1])
+    bsum = basin_summary()
+    basin_current = bool(bsum) and "rules" in bsum   # written by the corrected screening
     show_countries = st.sidebar.checkbox("Official country status", value=True)
-    show_basin = st.sidebar.checkbox("Basin screening (annual, 100 m)", value=True)
+    show_basin = st.sidebar.checkbox("Basin screening (annual, 100 m)", value=basin_current)
+    basin_earlier = show_basin and st.sidebar.checkbox("…include squares from earlier seasons", value=False)
     show_proj = st.sidebar.checkbox("Projected natural spread (3 years)", value=True)
     show_regions = st.sidebar.checkbox("Detailed scan areas (weekly, 10 m)", value=True)
 
@@ -261,18 +326,21 @@ def overview(regs, recs):
                   for s in sorted(STATUS.values(), key=lambda s: -s["order"])]
     legend(items)
 
-    m = folium.Map(location=[38.5, 14.0], zoom_start=5, tiles="OpenStreetMap")
+    # Canvas rendering draws thousands of shapes far faster than one SVG element each
+    m = folium.Map(location=[38.5, 14.0], zoom_start=5, tiles="OpenStreetMap", prefer_canvas=True)
     if show_countries:
         add_countries(m, ccfg)
-    bsum, bhot = basin()
+    basin_drawn = basin_total = 0
     if show_basin:
-        add_basin(m, bhot)
+        fc, basin_total = basin_layer(mtime(DATA / "basin" / "hotspots.geojson"), basin_earlier)
+        basin_drawn = len(fc["features"])
+        add_basin(m, fc)
     if show_proj:
         add_projection(m, recs, upto)
     add_records(m, recs, upto, upto)
     if show_regions:
         for r in regs:
-            s, _, _ = region_data(r["id"])
+            s = region_status(r["id"])
             w, so, e, n = r["bbox"]
             tot = (s or {}).get("totals_ha", {})
             summary = (f"Season {s['latest_season']}: {tot.get('new', 0)} ha new, "
@@ -289,19 +357,26 @@ def overview(regs, recs):
         "forecast: insects carried by vehicles and moved plants cause long jumps, as with the Gargano (2025) and "
         "Calabria (2026) outbreaks, and no ring would have predicted those.")
 
-    if show_basin:
-        if bsum:
-            pend = bsum.get("cells_pending", 0)
-            st.caption(
-                f"**Basin screening, summer {bsum['season']} vs {bsum['season'] - 1}:** {bsum['squares']} squares of "
-                f"{bsum['square_km']:g} km with sudden decline of trees or crops at 100 m "
-                f"({bsum['flagged_ha'].get('new', 0):,} ha new). Wildfire scars, towns and rotating crops are filtered "
-                "out, but this layer is not olive-specific: drought, felling or forest dieback can look the same. "
-                "A square is a reason to look closer, not a Xylella finding."
-                + (f" {pend} of {bsum['cells_total']} map cells are still being processed." if pend else ""))
-        else:
-            st.caption("**Basin screening:** no results yet. It runs each autumn after the summer it compares; "
-                       "start 'Annual Basin Screening' on GitHub to run it now.")
+    if bsum and not basin_current:
+        st.caption("**Basin screening:** the current results come from the first run, which mistook wildfire scars, "
+                   "grassland and arable land for decline. They are hidden by default and are being recomputed with "
+                   "corrected rules.")
+    if show_basin and bsum:
+        pend = bsum.get("cells_pending", 0)
+        by = bsum.get("squares_by_status", {})
+        now = by.get("new", 0) + by.get("continuing", 0) if by else bsum.get("squares", 0)
+        st.caption(
+            f"**Basin screening, summer {bsum['season']}:** {now:,} squares of {bsum['square_km']:g} km where at least "
+            f"10 ha and 2 % of the judged land lost greenness sharply at 100 m "
+            f"({bsum['flagged_ha'].get('new', 0):,} ha new in total). This season is provisional until next summer "
+            "shows whether the land greens up again. Wildfire scars, towns, grassland and unsteady crops are filtered "
+            "out, but the layer is not olive-specific: drought, felling or forest dieback can look the same. "
+            "A square is a reason to look closer, not a Xylella finding."
+            + (f" Showing the strongest {basin_drawn:,} of {basin_total:,} squares." if basin_total > basin_drawn else "")
+            + (f" {pend} of {bsum['cells_total']} map cells are still being processed." if pend else ""))
+    elif show_basin:
+        st.caption("**Basin screening:** no results yet. It runs each autumn after the summer it compares; "
+                   "start 'Annual Basin Screening' on GitHub to run it now.")
 
     with st.expander(f"Records from {upto}"):
         rows = [{"Place": r["place"], "Country": r["country"], "Subspecies": r["subspecies"],
@@ -317,7 +392,7 @@ def overview(regs, recs):
 def region_view(r, recs):
     st.subheader(r["name"])
     st.info(f"**Official status.** {r['official_status']}\n\n{ROLE_TEXT.get(r.get('role'), '')}")
-    status, zones, history = region_data(r["id"])
+    status, history = region_status(r["id"]), region_history(r["id"])
     if not status:
         st.warning("This area hasn't been scanned yet. Start the 'Weekly Xylella Scan' workflow on GitHub.")
         return
@@ -339,10 +414,13 @@ def region_view(r, recs):
             sorted(STATUS.values(), key=lambda s: -s["order"])]
            + [("border:2px dashed #374151", "Dashed outline: parcel-shaped patch, possibly trees removed")])
 
+    show_earlier = st.checkbox("Show areas flagged in earlier seasons", value=True,
+                               help="Turning this off makes the map faster in areas with many older patches.")
     w, so, e, n = r["bbox"]
-    m = folium.Map(location=[(so + n) / 2, (w + e) / 2], zoom_start=13, tiles="OpenStreetMap")
+    m = folium.Map(location=[(so + n) / 2, (w + e) / 2], zoom_start=13, tiles="OpenStreetMap",
+                   prefer_canvas=True)
     folium.Rectangle([[so, w], [n, e]], color="#2563EB", weight=1, fill=False, tooltip="Scanned area").add_to(m)
-    add_zones(m, zones)
+    add_zones(m, zones_layers(r["id"], mtime(DATA / r["id"] / "zones.geojson")), show_earlier)
     near = [x for x in recs if so - 0.3 <= x["lat"] <= n + 0.3 and w - 0.3 <= x["lon"] <= e + 0.3]
     add_records(m, near, 9999, -1)
     m.fit_bounds([[so, w], [n, e]])
