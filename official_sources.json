@@ -47,6 +47,16 @@
    "pages": [
     "https://portalagrari.gva.es/es/agricultura/xylella-fastidiosa"
    ]
+  },
+  {
+   "id": "ltima-situaci-n-baleares",
+   "name": "Última situación Baleares",
+   "kind": "links",
+   "pages": [
+    "https://www.caib.es/sites/xf/es/situacian_actual_en_las_illes_balears/"
+   ],
+   "pattern": "archivopub\\.do",
+   "verify_tls": false
   }
  ],
  "discovery": {
