@@ -1,0 +1,25 @@
+{
+ "checked": "2026-10-22",
+ "sources": {
+  "eu-demarcated": {
+   "href": "https://food.ec.europa.eu/document/download/77ec3d12-c080-4273-b604-5cb5164a4c78_en?filename=ph_biosec_legis_list-demarcated-union-territory_en.pdf",
+   "sha256": "151cd72550cc28788a816945e9c39c42a5f77c9899fc12eca4fba42a99ed2c01"
+  },
+  "efsa-hosts": {
+   "record": "20539663"
+  },
+  "it-puglia": {
+   "items": [
+    "844",
+    "862",
+    "889",
+    "892",
+    "894",
+    "897",
+    "899",
+    "902",
+    "976"
+   ]
+  }
+ }
+}
