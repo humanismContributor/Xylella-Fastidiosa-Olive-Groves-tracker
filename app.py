@@ -308,7 +308,7 @@ def overview(regs, recs):
                  "Host": r["host"], "What happened": r["kind"], "Source": r["source_url"]}
                 for r in recs if r["year"] == upto]
         if rows:
-            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True,
+            st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch",
                          column_config={"Source": st.column_config.LinkColumn("Source")})
         else:
             st.write("No records for this year.")
