@@ -7,7 +7,7 @@ point to *Xylella fastidiosa*. Deployed on Streamlit Community Cloud from `main`
 - `xylella_scanner.py`: weekly 10 m Sentinel-2 scan of the areas in `regions.json`
   (workflow `main.yml`). Per-cell history in `data/<region>/state.npz`.
 - `basin_scanner.py`: yearly 100 m screen of the olive belt in `basin.json`, in 1° cells
-  (workflow `basin.yml`, Sept–Nov). Output in `data/basin/`.
+  (workflow `basin.yml`, Sept–Nov, at most 16 parallel jobs so the weekly scan always gets a runner). Output in `data/basin/`.
 - `crop_masks.py`: parcel masks from farm registers (SIGPAC Balearics so far) for non-olive profiles.
 - `eppo_check.py`: weekly EPPO check that opens GitHub issues (workflow `eppo.yml`). Records are
   added to `official_outbreaks.json` / `country_status.json` by hand after review, never automatically.
