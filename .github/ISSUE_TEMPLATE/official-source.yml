@@ -1,0 +1,54 @@
+name: Suggest an official source
+description: A page of an official body (ministry, region, EU agency) to watch for Xylella updates.
+title: "Source: "
+labels: ["source-suggestion"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        After you submit, add the **approved-source** label. A workflow then tests the page and, if it works,
+        adds it to `official_sources.json` and closes this issue. If it doesn't work, it explains why in a comment;
+        edit the issue and remove and re-add the label to try again.
+  - type: input
+    id: name
+    attributes:
+      label: Name
+      description: Who publishes it, e.g. "Comunidad Valenciana, plant health service"
+    validations:
+      required: true
+  - type: input
+    id: url
+    attributes:
+      label: Page URL
+      description: The page to watch (for a Zenodo record, its zenodo.org/records/... address)
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What to watch
+      options:
+        - New links on the page (notices, PDFs)
+        - One document linked from the page that gets updated
+        - A Zenodo record that gets new versions
+    validations:
+      required: true
+  - type: input
+    id: match
+    attributes:
+      label: Pattern or link text
+      description: |
+        New links: a pattern the link addresses must match (leave empty for PDFs).
+        One document: the text of its link on the page. Zenodo: leave empty.
+  - type: checkboxes
+    id: tls
+    attributes:
+      label: Certificate
+      description: Only if a first try failed because the site's certificate "can't be verified".
+      options:
+        - label: Read it without verifying the certificate (I trust this site)
+  - type: input
+    id: todo
+    attributes:
+      label: What to do when it changes
+      description: Shown in the update issue, e.g. "New outbreak in Valencia? Update official_outbreaks.json"

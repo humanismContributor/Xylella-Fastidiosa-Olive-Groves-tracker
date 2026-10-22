@@ -1,0 +1,45 @@
+{
+ "sources": [
+  {
+   "id": "eu-demarcated",
+   "name": "EU list of demarcated areas",
+   "kind": "document",
+   "page": "https://food.ec.europa.eu/plants/plant-health-and-biosecurity/plant-health-rules/control-measures/xylella-fastidiosa_en",
+   "link_text": "List of demarcated areas in the EU",
+   "todo": "Compare the member-state lists with `official_outbreaks.json` (new or lifted demarcated areas)"
+  },
+  {
+   "id": "efsa-hosts",
+   "name": "EFSA Xylella spp. host plant database",
+   "kind": "zenodo",
+   "concept": "1339343",
+   "todo": "Read the release notes for new host species; note any found in the Mediterranean"
+  },
+  {
+   "id": "es-mapa",
+   "name": "Spain, Ministry of Agriculture (MAPA)",
+   "kind": "links",
+   "pages": ["https://www.mapa.gob.es/es/agricultura/temas/sanidad-vegetal/organismos-nocivos/xylella-fastidiosa"],
+   "pattern": "/dam/mapa/.*xylella.*\\.pdf",
+   "todo": "New outbreak or demarcated area in Spain? Update `official_outbreaks.json` / `country_status.json`"
+  },
+  {
+   "id": "it-puglia",
+   "name": "Puglia, Emergenza Xylella (regional plant health service)",
+   "kind": "links",
+   "pages": ["http://www.emergenzaxylella.it/",
+             "http://www.emergenzaxylella.it/portal/portale_gestione_agricoltura/Documenti/normRegionale"],
+   "pattern": "/portal/portale_gestione_agricoltura/Documenti/.*IDNEWS=\\d+",
+   "key": "IDNEWS=(\\d+)",
+   "note": "Read over HTTP: the site's HTTPS certificate is issued for another domain",
+   "todo": "New outbreak (focolaio) or change to the demarcated area? Update `official_outbreaks.json`"
+  }
+ ],
+ "discovery": {
+  "extra_hubs": ["https://www.efsa.europa.eu/en/topics/topic/xylella-fastidiosa"],
+  "ignore_hosts": ["bsky.app", "wa.me", "twitter.com", "x.com", "www.facebook.com", "www.linkedin.com",
+                   "efsa.onlinelibrary.wiley.com", "doi.org", "audiovisual.ec.europa.eu", "open.efsa.europa.eu",
+                   "www.efsa.europa.eu", "ec.europa.eu", "food.ec.europa.eu", "www.eppo.int", "gd.eppo.int",
+                   "zenodo.org"]
+ }
+}

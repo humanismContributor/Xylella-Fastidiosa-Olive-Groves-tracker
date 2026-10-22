@@ -1,0 +1,46 @@
+name: Quarterly Source Discovery
+
+# Once a quarter, looks for official Xylella pages that aren't watched yet (see
+# discover_sources.py) and opens one issue listing them, each with a link to the
+# pre-filled "Suggest an official source" form. Nothing is added automatically.
+
+on:
+  schedule:
+    - cron: '37 5 2 1,4,7,10 *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+# Shares official_seen.json with the weekly check
+concurrency:
+  group: xylella-official
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Look for new sources
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python discover_sources.py
+      - name: Save what has been suggested
+        run: |
+          set -e
+          git config user.name "Automated Satellite Bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add official_seen.json
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Source discovery: update suggested sites"
+            git pull --rebase origin main
+            git push origin main
+          fi

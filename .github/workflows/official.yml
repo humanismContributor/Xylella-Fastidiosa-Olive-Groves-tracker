@@ -1,9 +1,9 @@
 name: Weekly Official Sources Check
 
-# Watches official sources besides EPPO: the EU list of demarcated areas, the
-# EFSA host plant database, Spain's MAPA and Puglia's Emergenza Xylella portal
-# (see SOURCES in official_check.py). Opens a GitHub issue for each source that
-# changed. The first run only records what already exists.
+# Watches official sources besides EPPO, listed in official_sources.json (at
+# first: the EU list of demarcated areas, the EFSA host plant database, Spain's
+# MAPA and Puglia's Emergenza Xylella portal). Opens a GitHub issue for each
+# source that changed. A source's first run only records what already exists.
 
 on:
   schedule:
